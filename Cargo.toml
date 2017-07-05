@@ -5,3 +5,4 @@ authors = ["haze"]
 
 [dependencies]
 clap = "2.25.0"
+time = "0.1.37"

@@ -1,9 +1,13 @@
 extern crate clap;
 use clap::{Arg, App};
+
+extern crate time;
+use time::Duration;
+
 use std::fs::File;
 
 mod interpreter;
-use interpreter::ill::Interpreter;
+use interpreter::ill::{Interpreter, IllError};
 
 fn main() {
     let arg_matches = App::new("ill interpreter")
@@ -23,6 +27,15 @@ fn main() {
         .filter(|fin| File::open(fin).is_ok())
         .map(|x| File::open(x).unwrap()).collect();
     
-    let int: Interpreter = Interpreter::new(arg_matches.is_present("debug"), input_files);
-    int.begin_parsing();
+    let mut int: Interpreter = Interpreter::new(arg_matches.is_present("debug"), input_files);
+    let mut res: Result<(), IllError> = Ok(());
+    let dur = Duration::span(||
+        {
+            res = int.begin_parsing();
+        }
+    );
+    if res.is_err() {
+        println!("[ERROR]: {}", res.err().unwrap());
+    }
+    println!("PILL Execution took: {}s, ({} ms)", dur.num_seconds(), dur.num_milliseconds());
 }
