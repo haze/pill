@@ -35,7 +35,7 @@ fn main() {
         }
     );
     if res.is_err() {
-        println!("[ERROR]: {}", res.err().unwrap());
+        println!("[ERROR:]: {}", res.err().unwrap());
     }
     println!("PILL Execution took: {}s, ({} ms)", dur.num_seconds(), dur.num_milliseconds());
 }
