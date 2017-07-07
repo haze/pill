@@ -4,11 +4,12 @@ pub mod ill {
     use std::fs::File;
     use std::io::Read;
     use std::iter::Peekable;
-    use std::iter::Cloned;
     use std::str::Chars;
     use std::error::Error;
     use std::fmt;
     use std::fmt::{Display, Formatter};
+
+    use NamedFile;
 
     const NEWLINE: char = '\n';
     const STACK_DEF: char = '+';
@@ -21,15 +22,21 @@ pub mod ill {
         value: usize,
     }
 
-
     #[derive(Debug)]
     struct EnhancedFile {
         file: File,
+        filename: String,
         content: String,
     }
 
+    impl Clone for EnhancedFile {
+        fn clone(&self) -> EnhancedFile {
+            EnhancedFile { filename: self.filename.clone(), content: self.content.clone(), file: self.file.try_clone().expect("Faield to copy file...") }
+        }
+    }
+
     #[derive(Default, Debug)]
-    struct ReadHead {
+    pub struct ReadHead {
         column: u32,
         line: u32,
     }
@@ -37,7 +44,7 @@ pub mod ill {
     #[derive(Debug)]
     pub enum IllError {
         StackRefinition(ReadHead, String),
-        NoStacksFound(File),
+        NoStacksFound(EnhancedFile),
     }
 
     impl Error for IllError {
@@ -45,19 +52,27 @@ pub mod ill {
             match *self {
                 IllError::StackRefinition(_, _) => "A stack redefinition was attempted.",
                 IllError::NoStacksFound(_) => "No stack definitions found.",
-                _ => "Unknown Error.",
             }
         }
     }
 
+    impl IllError {
+        pub fn name(&self) -> String {
+            String::from(
+                match *self {
+                    IllError::StackRefinition(_, _) => "Stack Redefinition",
+                    IllError::NoStacksFound(_) => "No Stack Found",
+                }
+            )
+        }
+    }
 
     impl Display for IllError {
         fn fmt(&self, f: &mut Formatter) -> fmt::Result {
             fn fmt_rh(rh: &ReadHead) -> String { format!("[{}:{}]", rh.line, rh.column) }
             match *self {
                 IllError::StackRefinition(ref rh, ref name) => write!(f, "Err@{} => The stack named \"{}\" already exists!", fmt_rh(rh), name),
-                IllError::NoStacksFound(ref e_file) => write!(f, "Cannot find a stack definition for {:?}", e_file),
-                _ => write!(f, "Undocumented Error."),
+                IllError::NoStacksFound(ref e_file) => write!(f, "Cannot find a stack definition for {:?}", e_file.filename),
             }
         }
     }
@@ -88,15 +103,16 @@ pub mod ill {
     }
 
     impl Interpreter {
-        pub fn new(debug: bool, sources: Vec<File>) -> Interpreter {
-            Interpreter { debug: debug, files: sources.iter().map(|mut f| {
+        pub fn new(debug: bool, sources: Vec<NamedFile>) -> Interpreter {
+            Interpreter { debug: debug, files: sources.iter().map(|mut nf| {
                 let mut content = String::new();
-                let sz = f.read_to_string(&mut content).unwrap_or(0);
+                let mut clone = nf.file.try_clone().expect(&*format!("[ERROR!]: could not create a copy of: {:?}", nf.name));
+                let sz = clone.read_to_string(&mut content).unwrap_or(0);
                 if debug {
-                    println!("[:] read {} bytes for {:?}", sz, f);
+                    println!("[:] read {} bytes for {:?}", sz, nf.file);
                     println!("content = `{}`", content);
                 }
-                EnhancedFile { file: f.try_clone().expect(&*format!("[ERROR!]: could not create a copy of: {:?}", f)), content: content }
+                EnhancedFile { filename: nf.name.clone(), file: clone, content: content }
             }).collect(), .. Default::default() }
         }
 
@@ -141,8 +157,7 @@ pub mod ill {
                     }
                 }
                 if !has_found_stacks {
-                    let file = e_file.file.try_clone().expect("FATAL: Failed to copy file for err formatting.");
-                    return Err(IllError::NoStacksFound(file));
+                    return Err(IllError::NoStacksFound(e_file.clone()));
                 }
             }
             Ok(())

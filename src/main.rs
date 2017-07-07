@@ -1,13 +1,24 @@
 extern crate clap;
+
 use clap::{Arg, App};
 
 extern crate time;
 use time::Duration;
 
+extern crate termcolor;
+use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
+
+
 use std::fs::File;
+use std::io::Write;
 
 mod interpreter;
 use interpreter::ill::{Interpreter, IllError};
+
+pub struct NamedFile {
+    file: File,
+    name: String
+}
 
 fn main() {
     let arg_matches = App::new("ill interpreter")
@@ -23,9 +34,9 @@ fn main() {
             .short("d"))
         .get_matches();
     let input_files_str: Vec<_> = arg_matches.values_of("inputs").unwrap().collect();
-    let input_files: Vec<File> = input_files_str.iter()
-        .filter(|fin| File::open(fin).is_ok())
-        .map(|x| File::open(x).unwrap()).collect();
+    let input_files: Vec<NamedFile> = input_files_str.iter()
+        .filter(|x| File::open(x).is_ok())
+        .map(|x| NamedFile { file: File::open(x).unwrap(), name: String::from(*x) } ).collect();
     
     let mut int: Interpreter = Interpreter::new(arg_matches.is_present("debug"), input_files);
     let mut res: Result<(), IllError> = Ok(());
@@ -34,8 +45,15 @@ fn main() {
             res = int.begin_parsing();
         }
     );
+
+    let mut out = StandardStream::stdout(ColorChoice::Always);
+
     if res.is_err() {
-        println!("[ERROR:]: {}", res.err().unwrap());
+        let err = res.err().unwrap();
+        let _ = out.set_color(ColorSpec::new().set_fg(Some(Color::Red)));
+        write!(&mut out, "{}", err.name());
+        let _ = out.set_color(ColorSpec::new().set_fg(Some(Color::White)));
+        print!(": {}\n", err);
     }
     println!("PILL Execution took: {}s, ({} ms)", dur.num_seconds(), dur.num_milliseconds());
 }
