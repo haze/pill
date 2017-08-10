@@ -1,3 +1,5 @@
 +a;
 
-$should_be_main() {}
+$should_be_main() {
+    
+}

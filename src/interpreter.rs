@@ -56,8 +56,8 @@ pub mod ill {
 
     #[derive(Default, Debug, Clone)]
     pub struct ReadHead {
-        column: u32,
-        line: u32,
+        column: i32,
+        line: i32,
     }
 
     #[derive(Debug)]
@@ -144,12 +144,21 @@ pub mod ill {
 
     impl ReadHead {
         fn new() -> ReadHead {
-            ReadHead { line: 1, column: 1 }
+            ReadHead { line: 1, column: 1 } 
         }
-        fn advance_by(&mut self, line: u32, col: u32) {
+        
+        fn new_by(&self, line: i32, col: i32) -> ReadHead {
+            ReadHead {
+                line: self.line + line,
+                column: self.column + col
+            }
+        }
+
+        fn advance_by(&mut self, line: i32, col: i32) {
             self.column += col;
             self.line += line;
         }
+
         fn advance(&mut self, ch: char) {
             if ch == NEWLINE {
                 self.advance_by(1, 0);
@@ -188,31 +197,35 @@ pub mod ill {
         let _ = traverse_read(head, read_until_spare_ws(it, ch));
     }
 
-    fn read_until_spare_ws(it: &mut Peekable<Chars>, ch: Vec<char>) -> (u32, String) {
+    fn read_until_spare_ws(it: &mut Peekable<Chars>, ch: Vec<char>) -> (i32, i32, String) {
         let z = it.take_while(|c| !ch.contains(c)).collect::<String>();
+        let nl = z.chars().filter(|x| *x == NEWLINE).count() as i32;
         (
-            ((z.len() + 1) - z.chars().filter(|x| *x == NEWLINE).count() as usize) /* Compensate for missing ';' */ as u32,
+            nl,
+            z.len() as i32 - nl,
             z.chars().collect::<String>(),
         )
     }
 
-    fn read_until(it: &mut Peekable<Chars>, ch: Vec<char>) -> (u32, String) {
+    fn read_until(it: &mut Peekable<Chars>, ch: Vec<char>) -> (i32, i32, String) {
         let z = it.take_while(|c| !ch.contains(c)).collect::<String>();
+        let nl = z.chars().filter(|x| *x == NEWLINE).count() as i32;
         (
-            ((z.len() + 1) - z.chars().filter(|x| *x == NEWLINE).count() as usize) /* Compensate for missing ';' */ as u32,
+            nl,
+            z.len() as i32 - nl,
             z.chars().filter(|c| !c.is_whitespace()).collect::<String>(),
         )
     }
 
     fn any_exists_until(it: &mut Peekable<Chars>, exists: Vec<char>, until: Vec<char>) -> bool {
-        let (_, data) = read_until(it, until);
+        let (_, _, data) = read_until(it, until);
         data.chars().find(|x| exists.contains(x)).is_some()
     }
 
-    fn traverse_read(head: &mut ReadHead, data: (u32, String)) -> String {
-        let (trav, dat) = data;
+    fn traverse_read(head: &mut ReadHead, data: (i32, i32, String)) -> String {
+        let (row, col, dat) = data;
         // println!("traversing {} for \"{}\" [{}]", trav, dat, dat.len());
-        head.advance_by(dat.chars().filter(|x| *x == NEWLINE).count() as u32, trav);
+        head.advance_by(row, col);
         dat
     }
 
@@ -282,9 +295,8 @@ pub mod ill {
 
         fn scan_instructions(&mut self) -> Result<(), IllError> {
 
-            fn read_inst_def(it: &mut Peekable<Chars>) -> (u32, String) {
-                let (trav, st) = read_until(it, vec![INST_PARAM_BEGIN]);
-                (trav, st)
+            fn read_inst_def(it: &mut Peekable<Chars>) -> (i32, i32, String) {
+                read_until(it, vec![INST_PARAM_BEGIN])
             }
 
             for e_file in &self.files {
@@ -342,7 +354,7 @@ pub mod ill {
                             }
                             cur_inst_sb.is_reading_codes = false;
                             if self.does_instruction_exist(cur_inst.name.clone()) {
-                                return Err(IllError::InstructionRedefinition(head, cur_inst.name));
+                                return Err(IllError::InstructionRedefinition(head.new_by(0, -(cur_inst.name.len() as i32)), cur_inst.name));
                             }
                             self.instructions.push(cur_inst);
                             cur_inst = Default::default();
@@ -370,13 +382,11 @@ pub mod ill {
                         if x == STACK_DEF {
                             has_found_stacks = true;
                             while iter.peek().is_some() && *iter.peek().unwrap() != NEWLINE {
-                                let (trav, stack_name) =
-                                    read_until(iter.by_ref(), vec![DEF_END, NEWLINE]);
+                                let stack_name = traverse_read(&mut head, read_until(iter.by_ref(), vec![DEF_END, NEWLINE]));
                                 if self.does_stack_exist(stack_name.clone()) {
                                     let err_str = stack_name.clone();
                                     return Err(StackRefinition(head, err_str));
                                 }
-                                head.advance_by(0, trav);
                                 self.stacks.push(Stack {
                                     identifier: stack_name,
                                     is_variable: false,
