@@ -64,9 +64,11 @@ pub mod ill {
     pub enum IllError {
         StackRefinition(ReadHead, String),
         NoStacksFound(EnhancedFile),
-        UnexpectedCharacter(ReadHead, char),
+        UnexpectedCharacter(ReadHead, char, Option<String>),
         InstructionRedefinition(ReadHead, String),
         UnknownOpCode(ReadHead, String),
+        InvalidOpCodeArguments(ReadHead, String),
+        OpCodeArgumentMismatch(ReadHead, String, i32, i32),
     }
 
     impl Error for IllError {
@@ -74,9 +76,11 @@ pub mod ill {
             match *self {
                 StackRefinition(_, _) => "A stack redefinition was attempted.",
                 NoStacksFound(_) => "No stack definitions found.",
-                UnexpectedCharacter(_, _) => "Unexpected character found.",
+                UnexpectedCharacter(_, _, _) => "Unexpected character found.",
                 InstructionRedefinition(_, _) => "A instruction redefinition was attempted.",
-                UnknownOpCode(_, _) => "An unknown OpCode was used!",
+                UnknownOpCode(_, _) => "An unknown OpCode was used.",
+                InvalidOpCodeArguments(_, _) => "An invalid instruction for an OpCode was found.",
+                OpCodeArgumentMismatch(_, _, _, _) => "Opcode has too few or many arguments.",
             }
         }
     }
@@ -86,9 +90,11 @@ pub mod ill {
             String::from(match *self {
                 StackRefinition(_, _) => "Stack Redefinition",
                 NoStacksFound(_) => "No Stack Found",
-                UnexpectedCharacter(_, _) => "Unexpected Character",
+                UnexpectedCharacter(_, _, _) => "Unexpected Character",
                 InstructionRedefinition(_, _) => "Instruction Redefinition",
                 UnknownOpCode(_, _) => "Unknown OpCode",
+                InvalidOpCodeArguments(_, _) => "Invalid OpCode Instruction",
+                OpCodeArgumentMismatch(_, _, _, _) => "OpCode Argument Length Mismatch",
             })
         }
     }
@@ -122,12 +128,13 @@ pub mod ill {
                         e_file.filename
                     )
                 }
-                UnexpectedCharacter(ref rh, ref ch) => {
+                UnexpectedCharacter(ref rh, ch, ref exp) => {
                     write!(
                         f,
-                        "Err@{} => Found unexpected character {}.",
-                        fmt_rh(rh),
-                        ch
+                        "Err@{} => Found unexpected character {}{}",
+                        fmt_rh(&rh),
+                        ch,
+                        exp.as_ref().unwrap_or(&String::from("."))
                     )
                 }
                 UnknownOpCode(ref rh, ref code) => {
@@ -138,19 +145,37 @@ pub mod ill {
                         code
                     )
                 }
+                InvalidOpCodeArguments(ref rh, ref code) => {
+                    write!(
+                        f,
+                        "Err@{} => \"{}\" is not a valid OpCode",
+                        fmt_rh(rh),
+                        code
+                    )
+                }
+                OpCodeArgumentMismatch(ref rh, ref code, ref exp, ref given) => {
+                    write!(
+                        f,
+                        "Err@{} => \"{}\", invalid amount of arguments, expected {}, but received {}.",
+                        fmt_rh(rh),
+                        code,
+                        exp,
+                        given
+                    )
+                }
             }
         }
     }
 
     impl ReadHead {
         fn new() -> ReadHead {
-            ReadHead { line: 1, column: 1 } 
+            ReadHead { line: 1, column: 1 }
         }
-        
+
         fn new_by(&self, line: i32, col: i32) -> ReadHead {
             ReadHead {
                 line: self.line + line,
-                column: self.column + col
+                column: self.column + col,
             }
         }
 
@@ -173,6 +198,7 @@ pub mod ill {
     struct Instruction {
         name: String,
         codes: Vec<OpCode>,
+        scope: Vec<Stack>,
         arguments: Vec<String>,
         is_main: bool,
     }
@@ -199,17 +225,17 @@ pub mod ill {
 
     fn read_until_spare_ws(it: &mut Peekable<Chars>, ch: Vec<char>) -> (i32, i32, String) {
         let z = it.take_while(|c| !ch.contains(c)).collect::<String>();
-        let nl = z.chars().filter(|x| *x == NEWLINE).count() as i32;
-        (
-            nl,
-            z.len() as i32 - nl,
-            z.chars().collect::<String>(),
-        )
+        let nl = newlines(&z);
+        (nl, z.len() as i32 - nl, z.chars().collect::<String>())
+    }
+
+    fn newlines(x: &String) -> i32 {
+        x.chars().filter(|x| *x == NEWLINE).count() as i32
     }
 
     fn read_until(it: &mut Peekable<Chars>, ch: Vec<char>) -> (i32, i32, String) {
         let z = it.take_while(|c| !ch.contains(c)).collect::<String>();
-        let nl = z.chars().filter(|x| *x == NEWLINE).count() as i32;
+        let nl = newlines(&z);
         (
             nl,
             z.len() as i32 - nl,
@@ -224,21 +250,31 @@ pub mod ill {
 
     fn traverse_read(head: &mut ReadHead, data: (i32, i32, String)) -> String {
         let (row, col, dat) = data;
-        // println!("traversing {} for \"{}\" [{}]", trav, dat, dat.len());
+        /* println!(
+            "traversing [{}, {}] for \"{}\" [{}]",
+            row,
+            col,
+            dat,
+            dat.len()
+        ); */
         head.advance_by(row, col);
         dat
     }
 
 
     impl Interpreter {
-        fn does_opcode_exist(&self, name: &String) -> bool {
-            self.opcodes
-                .iter()
-                .find(|x: &&OpCode| x.name == name.clone())
-                .is_some()
+        fn find_opcode(&self, name: String) -> Option<&OpCode> {
+            self.opcodes.iter().find(|x: &&OpCode| x.name == name)
+        }
+
+        fn does_opcode_exist(&self, name: String) -> bool {
+            self.find_opcode(name).is_some()
         }
 
         pub fn new(debug: bool, sources: Vec<NamedFile>, opcodes: Vec<OpCode>) -> Interpreter {
+            if debug {
+                println!("Making Interpreter with opcodes {:?}", opcodes);
+            }
             Interpreter {
                 opcodes: opcodes,
                 debug: debug,
@@ -287,8 +323,21 @@ pub mod ill {
         fn parse_code(&self, rh: ReadHead, code: String) -> Result<OpCode, IllError> {
             let data: Vec<String> = code.split(' ').map(String::from).collect::<Vec<String>>();
             let code_name = data[0].clone();
-            if self.does_opcode_exist(&code_name) {
-                return Err(IllError::UnknownOpCode(rh, data[0].clone()));
+            let nls = newlines(&code) as usize;
+            if !self.does_opcode_exist(code_name.clone()) {
+                return Err(IllError::UnknownOpCode(
+                    rh.new_by(-(nls as i32), ((-rh.column) + code.len() as i32)),
+                    data[0].clone(),
+                ));
+            }
+            let opcode = self.find_opcode(code_name.clone()).unwrap();
+            if (data.len() - 1) != opcode.arguments.len() {
+                return Err(IllError::OpCodeArgumentMismatch(
+                    rh.new_by(-(nls as i32), ((-rh.column) + code.len() as i32)),
+                    data[0].clone(),
+                    opcode.arguments.len() as i32,
+                    (data.len() - 1) as i32,
+                ));
             }
             Ok(OpCode::new_str(code_name))
         }
@@ -308,7 +357,7 @@ pub mod ill {
                     head.advance(x);
                     if x == INST_DEF {
                         if cur_inst_sb.is_reading_definition {
-                            return Err(UnexpectedCharacter(head, x));
+                            return Err(UnexpectedCharacter(head, x, Some(String::from(" expecting instruction identifier."))));
                         } else {
                             cur_inst_sb.is_reading_definition = true;
                         }
@@ -338,23 +387,24 @@ pub mod ill {
                                 {
                                     break;
                                 }
-                                let code = traverse_read(
+                                let raw_code = traverse_read(
                                     &mut head,
                                     read_until_spare_ws(it.by_ref(), vec![DEF_END]),
-                                ).chars()
-                                    .filter(|x| *x != NEWLINE)
-                                    .collect::<String>();
-                                let t_code = code.trim();
-                                let res = self.parse_code(head.clone(), String::from(t_code));
+                                );
+                                let code = String::from(raw_code.trim());
+                                let res = self.parse_code(head.clone(), code.clone());
                                 if res.is_err() {
                                     return Err(res.err().unwrap());
                                 }
                                 cur_inst.codes.push(res.ok().unwrap());
-                                println!("found code \"{}\"", t_code);
+                                println!("found code \"{}\"", code);
                             }
                             cur_inst_sb.is_reading_codes = false;
                             if self.does_instruction_exist(cur_inst.name.clone()) {
-                                return Err(IllError::InstructionRedefinition(head.new_by(0, -(cur_inst.name.len() as i32)), cur_inst.name));
+                                return Err(IllError::InstructionRedefinition(
+                                    head.new_by(0, -(cur_inst.name.len() as i32)),
+                                    cur_inst.name,
+                                ));
                             }
                             self.instructions.push(cur_inst);
                             cur_inst = Default::default();
@@ -382,7 +432,10 @@ pub mod ill {
                         if x == STACK_DEF {
                             has_found_stacks = true;
                             while iter.peek().is_some() && *iter.peek().unwrap() != NEWLINE {
-                                let stack_name = traverse_read(&mut head, read_until(iter.by_ref(), vec![DEF_END, NEWLINE]));
+                                let stack_name = traverse_read(
+                                    &mut head,
+                                    read_until(iter.by_ref(), vec![DEF_END, NEWLINE]),
+                                );
                                 if self.does_stack_exist(stack_name.clone()) {
                                     let err_str = stack_name.clone();
                                     return Err(StackRefinition(head, err_str));
