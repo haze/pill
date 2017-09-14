@@ -9,7 +9,7 @@ pub mod ill {
 
     use opcodes::ill::OpCode;
     use opcodes::ill::ExpressionType;
-    use opcodes::ill::{r_container, r_literal, r_register, r_variable};
+    use opcodes::ill::{s_literal, r_container, r_literal, r_register, r_variable};
 
     use NamedFile;
     use IllError::*;
@@ -63,7 +63,7 @@ pub mod ill {
     #[derive(Debug)]
     pub enum IllError {
         RegisterRefinition(ReadHead, String),
-        NoregistersFound(EnhancedFile),
+        NoRegistersFound(EnhancedFile),
         UnexpectedCharacter(ReadHead, char, Option<String>),
         InstructionRedefinition(ReadHead, String),
         UnknownOpCode(ReadHead, String),
@@ -71,13 +71,14 @@ pub mod ill {
         OpCodeArgumentMismatch(ReadHead, String, i32, i32),
         NoMainInstruction(),
         OpCodeInvalidArgument(ReadHead, ExpressionType, String), // wanted, got
+        OpCodeInvalidContainerRefrence(ReadHead, ExpressionType, String, String)
     }
 
     impl Error for IllError {
         fn description(&self) -> &str {
             match *self {
                 RegisterRefinition(_, _) => "A Register redefinition was attempted.",
-                NoregistersFound(_) => "No Register definitions found.",
+                NoRegistersFound(_) => "No Register definitions found.",
                 UnexpectedCharacter(_, _, _) => "Unexpected character found.",
                 InstructionRedefinition(_, _) => "A instruction redefinition was attempted.",
                 UnknownOpCode(_, _) => "An unknown OpCode was used.",
@@ -85,6 +86,7 @@ pub mod ill {
                 OpCodeArgumentMismatch(_, _, _, _) => "Opcode has too few or many arguments.",
                 NoMainInstruction() => "No Main Instruction was found",
                 OpCodeInvalidArgument(_, _, _) => "Argument mismatch in OpCode"
+                OpCodeInvalidContainerRefrence(_, _, _, _) => "Container mismatch in OpCode"
             }
         }
     }
@@ -93,7 +95,7 @@ pub mod ill {
         pub fn name(&self) -> String {
             String::from(match *self {
                 RegisterRefinition(_, _) => "Register Redefinition",
-                NoregistersFound(_) => "No Register Found",
+                NoRegistersFound(_) => "No Register Found",
                 UnexpectedCharacter(_, _, _) => "Unexpected Character",
                 InstructionRedefinition(_, _) => "Instruction Redefinition",
                 UnknownOpCode(_, _) => "Unknown OpCode",
@@ -101,6 +103,7 @@ pub mod ill {
                 OpCodeArgumentMismatch(_, _, _, _) => "OpCode Argument Length Mismatch",
                 NoMainInstruction() => "No Main Instruction",
                 OpCodeInvalidArgument(_, _, _) => "Argument Mismatch"
+                OpCodeInvalidContainerRefrence(_, _, _, _) => "Container Mismatch"
             })
         }
     }
@@ -127,7 +130,7 @@ pub mod ill {
                         name
                     )
                 }
-                NoregistersFound(ref e_file) => {
+                NoRegistersFound(ref e_file) => {
                     write!(
                         f,
                         "Cannot find a Register definition for {:?}.",
@@ -176,6 +179,9 @@ pub mod ill {
                     write!(f, "Err@{} => Expected a {}, but got \"{}\" instead.", fmt_rh(rh), 
                     e_type.name(), got)
                 }
+                OpCodeInvalidContainerRefrence(ref rh, ref e_type, ref got, ref msg) => {
+                    write!(f, "Err@{} => Expected a {}, but got \"{}\" instead: {}.", fmt_rh(rh), e_type.name(), got, msg)
+                }
             }
         }
     }
@@ -214,6 +220,15 @@ pub mod ill {
         scope: Vec<Register>,
         arguments: Vec<String>,
         is_main: bool,
+    }
+
+    impl Instruction {
+        fn find_scoped_register(&self, name: String) -> Option<&Register> {
+            self.scope.iter().find(|&x| x.identifier == name)
+        }
+        fn does_scoped_register_exist(&self, name: String) -> bool {
+            self.find_scoped_register(name).is_some() 
+        }
     }
 
     #[derive(Default)]
@@ -263,13 +278,6 @@ pub mod ill {
 
     fn traverse_read(head: &mut ReadHead, data: (i32, i32, String)) -> String {
         let (row, col, dat) = data;
-        /* println!(
-            "traversing [{}, {}] for \"{}\" [{}]",
-            row,
-            col,
-            dat,
-            dat.len()
-        ); */
         head.advance_by(row, col);
         dat
     }
@@ -319,7 +327,7 @@ pub mod ill {
             self.registers.iter().find(|x: &&Register| x.identifier == name)
         }
 
-        fn does_register_exist(&mut self, name: String) -> bool {
+        fn does_register_exist(&self, name: String) -> bool {
             self.find_Register(name).is_some()
         }
 
@@ -333,7 +341,7 @@ pub mod ill {
             self.find_instruction(name).is_some()
         }
 
-        fn parse_code(&mut self, rh: ReadHead, code: String) -> Result<OpCode, IllError> {
+        fn parse_code(&self, rh: ReadHead, inst: &Instruction, code: String) -> Result<OpCode, IllError> {
             let data: Vec<String> = code.split(' ').map(String::from).collect::<Vec<String>>();
             let code_name = data[0].clone();
             let nls = newlines(&code) as usize;
@@ -344,7 +352,7 @@ pub mod ill {
                     data[0].clone(),
                 ));
             }
-            let opcode = self.find_opcode(code_name.clone()).unwrap();
+            let opcode = self.find_opcode(code_name.clone()).unwrap().clone();
             if (data.len() - 1) != opcode.arguments.len() {
                 return Err(IllError::OpCodeArgumentMismatch(
                     error_rh,
@@ -358,11 +366,15 @@ pub mod ill {
                 arg.parse::<usize>().is_ok()
             }
 
+            fn is_arg_string(arg: String) -> bool {
+                arg.chars().find(|x| x.is_numeric()).is_none() // just make sure its [A-z]
+            }
+
             let name = opcode.name.clone();
-            let mut args = opcode.arguments.clone();
-            
-            for i in 0 .. args.len() {
-                let expected = args[i].clone();
+            let mut exp_args = opcode.arguments.clone();
+            let mut act_args: Vec<ExpressionType> = Vec::new();
+            for i in 0 .. exp_args.len() {
+                let expected = exp_args[i].clone();
                 let ref argument = data[i + 1];
                 println!("arg = {}, expected = {:?}", argument, expected);
                 match expected {
@@ -370,33 +382,68 @@ pub mod ill {
                         if !is_arg_literal(argument.clone()) {
                             return Err(OpCodeInvalidArgument(
                                 error_rh,
-                                ExpressionType::IntegerLiteral(0),
+                                r_literal(0),
                                 argument.clone()
                             ));
                         } else { // See if I can do this by refrence? (looks to be too complicated, I don't want to have to use refcells)
-                            let new_opcode = 
-                            args[i] = ExpressionType::IntegerLiteral(argument.parse::<usize>().unwrap());
+                            act_args.push(ExpressionType::IntegerLiteral(argument.parse::<usize>().unwrap()));
                         }
                     }
-                    ExpressionType::ContainerRefrence(_) => {
-                        if !self.does_register_exist(argument.clone()) {
-                            
+
+                    ExpressionType::StringLiteral(_) => {
+                        if !is_arg_string(argument.clone()) {
+                            return Err(OpCodeInvalidArgument(
+                                error_rh,
+                                s_literal(),
+                                argument.clone()
+                            ));
                         } else {
-                            args[i] = ExpressionType::ContainerRefrence(argument.clone());
+                            act_args.push(ExpressionType::StringLiteral(argument.clone()))
+                        }
+                    }
+
+                    ExpressionType::ContainerRefrence(_) => {
+                        if !self.does_register_exist(argument.clone()) && !inst.does_scoped_register_exist(argument.clone()) {
+                            return Err(OpCodeInvalidArgument(
+                                error_rh,
+                                r_container(String::new()),
+                                argument.clone()
+                            ))
+                        } else {
+                            act_args.push(ExpressionType::ContainerRefrence(argument.clone()))
                         }
                     }
                     ExpressionType::RegisterRefrence(_) => {
-
+                        if !self.does_register_exist(argument.clone()) {
+                            return Err(OpCodeInvalidArgument(
+                                error_rh,
+                                r_register(String::new()),
+                                argument.clone()
+                            ))
+                        } else {
+                            act_args.push(ExpressionType::RegisterRefrence(argument.clone()))
+                        }
                     }
 
-                    ExpressionType::VariableRefrence(_) => {
-
+                    ExpressionType::VariableRefrence(_, _) => {
+                        if !self.does_register_exist(argument.clone()) {
+                            return Err(OpCodeInvalidArgument(
+                                error_rh,
+                                r_variable(String::new(), String::new()),
+                                argument.clone()
+                            ))
+                        } else {
+                            act_args.push(ExpressionType::VariableRefrence(inst.name.clone(), argument.clone()))
+                        }
                     }
                 }
             }
 
                 
-            Ok(OpCode::new_str(code_name))
+            Ok(OpCode {
+                name: code_name,
+                arguments: act_args,
+            })
         }
 
         fn scan_instructions(&mut self) -> Result<(), IllError> {
@@ -405,7 +452,7 @@ pub mod ill {
                 read_until(it, vec![INST_PARAM_BEGIN])
             }
 
-            for e_file in self.files {
+            for e_file in &self.files {
                 let mut it = e_file.content.chars().peekable();
                 let mut head: ReadHead = ReadHead::new();
                 let mut cur_inst: Instruction = Default::default();
@@ -474,7 +521,7 @@ pub mod ill {
                                     read_until_spare_ws(it.by_ref(), vec![DEF_END]),
                                 );
                                 let code = String::from(raw_code.trim());
-                                let res = self.parse_code(head.clone(), code.clone());
+                                let res = self.parse_code(head.clone(), &cur_inst, code.clone());
                                 if res.is_err() {
                                     return Err(res.err().unwrap());
                                 }
@@ -535,7 +582,7 @@ pub mod ill {
                     }
                 }
                 if !has_found_registers {
-                    return Err(NoregistersFound(e_file.clone()));
+                    return Err(NoRegistersFound(e_file.clone()));
                 } else if self.debug {
                     println!("Found registers: {:?}", self.registers);
                 }

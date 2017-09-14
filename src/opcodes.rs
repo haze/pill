@@ -6,9 +6,10 @@ pub mod ill {
     #[derive(Debug, Clone)]
     pub enum ExpressionType {
         IntegerLiteral(usize),
-        ContainerRefrence(String), // both stacks and variables, no difference
+        StringLiteral(String),
+        ContainerRefrence(String), // both stacks and variables, no difference (Will search current instruction before searching registers)
         RegisterRefrence(String), // Stack Name
-        VariableRefrence(String) // Variable Name
+        VariableRefrence(String, String) // Instruction Name, Variable Name
     }
 
 
@@ -18,7 +19,8 @@ pub mod ill {
                 IntegerLiteral(_) => "Integer Literal",
                 ContainerRefrence(_) => "Container Refrence",
                 RegisterRefrence(_) => "Register Refrence",
-                VariableRefrence(_) => "Variable Refrence"
+                VariableRefrence(_, _) => "Variable Refrence",
+                StringLiteral(_) => "String Literal"
             })
         }
     }
@@ -36,14 +38,18 @@ pub mod ill {
     }
 
     pub fn variable() -> ExpressionType {
-        ExpressionType::VariableRefrence(String::new())
+        ExpressionType::VariableRefrence(String::new(), String::new())
+    }
+
+    pub fn s_literal() -> ExpressionType {
+        ExpressionType::StringLiteral(String::new())
     }
 
     pub fn r_literal(it: usize) -> ExpressionType { ExpressionType::IntegerLiteral(it) }
     pub fn r_container(it: String) -> ExpressionType { ExpressionType::ContainerRefrence(it) }
     pub fn r_register(it: String) -> ExpressionType { ExpressionType::RegisterRefrence(it) }
-    pub fn r_variable(it: String) -> ExpressionType { ExpressionType::VariableRefrence(it) }
-
+    pub fn r_variable(inst_name: String, it: String) -> ExpressionType { ExpressionType::VariableRefrence(inst_name, it) }
+    pub fn r_string(it: String) -> ExpressionType { ExpressionType::StringLiteral(it) }
 
     pub fn do_opcode(code: OpCode) {
         // placeholder
@@ -52,8 +58,8 @@ pub mod ill {
     // i've always wanted a modular language...
     pub fn default_opcodes() -> Vec<OpCode> {
         let mut opcodes: Vec<OpCode> = Vec::new();
-        opcodes.push(OpCode::new("mov").expecting(container()).expecting(literal()));
-        opcodes.push(OpCode::new("mak").expecting(variable()).expecting(literal()));
+        opcodes.push(OpCode::new("mov").expecting(literal()).expecting(container()));
+        opcodes.push(OpCode::new("mak").expecting(s_literal()).expecting(literal()));
         opcodes.push(OpCode::new("cop").expecting(container()).expecting(container()));
         opcodes
     }
