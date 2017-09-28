@@ -15,7 +15,7 @@ pub mod ill {
     use IllError::*;
 
     const NEWLINE: char = '\n';
-    const Register_DEF: char = '+';
+    const REGISTER_DEF: char = '+';
     const DEF_END: char = ';';
 
 
@@ -31,11 +31,12 @@ pub mod ill {
     // commands
     const COMMENT_SINGLE_LINE: char = '|';
 
-    #[derive(Default, Debug)]
+    #[derive(Default, Debug, Clone)]
     pub struct Register {
         pub identifier: String,
         pub value: usize,
-        pub is_variable: bool,    }
+        pub is_variable: bool,
+    }
 
     #[derive(Debug)]
     pub struct EnhancedFile {
@@ -49,12 +50,12 @@ pub mod ill {
             EnhancedFile {
                 filename: self.filename.clone(),
                 content: self.content.clone(),
-                file: self.file.try_clone().expect("Faield to copy file..."),
+                file: self.file.try_clone().expect("Failed to copy file..."),
             }
         }
     }
 
-    #[derive(Default, Debug, Clone)]
+    #[derive(Default, Debug, Clone, Copy)]
     pub struct ReadHead {
         column: i32,
         line: i32,
@@ -62,7 +63,7 @@ pub mod ill {
 
     #[derive(Debug)]
     pub enum IllError {
-        RegisterRefinition(ReadHead, String),
+        RegisterRedefinition(ReadHead, String, Option<String>),
         NoRegistersFound(EnhancedFile),
         UnexpectedCharacter(ReadHead, char, Option<String>),
         InstructionRedefinition(ReadHead, String),
@@ -71,22 +72,24 @@ pub mod ill {
         OpCodeArgumentMismatch(ReadHead, String, i32, i32),
         NoMainInstruction(),
         OpCodeInvalidArgument(ReadHead, ExpressionType, String), // wanted, got
-        OpCodeInvalidContainerRefrence(ReadHead, ExpressionType, String, String)
+        OpCodeInvalidContainerReference(ReadHead, ExpressionType, String, String),
+        UnescapedStringLiteralIsContainer(ReadHead, String)
     }
 
     impl Error for IllError {
         fn description(&self) -> &str {
             match *self {
-                RegisterRefinition(_, _) => "A Register redefinition was attempted.",
+                RegisterRedefinition(_, _, _) => "A Register redefinition was attempted.",
                 NoRegistersFound(_) => "No Register definitions found.",
                 UnexpectedCharacter(_, _, _) => "Unexpected character found.",
                 InstructionRedefinition(_, _) => "A instruction redefinition was attempted.",
                 UnknownOpCode(_, _) => "An unknown OpCode was used.",
                 InvalidOpCodeArguments(_, _) => "An invalid instruction for an OpCode was found.",
-                OpCodeArgumentMismatch(_, _, _, _) => "Opcode has too few or many arguments.",
-                NoMainInstruction() => "No Main Instruction was found",
-                OpCodeInvalidArgument(_, _, _) => "Argument mismatch in OpCode"
-                OpCodeInvalidContainerRefrence(_, _, _, _) => "Container mismatch in OpCode"
+                OpCodeArgumentMismatch(_, _, _, _) => "OpCode has too few or many arguments.",
+                NoMainInstruction() => "No Main Instruction was found.",
+                OpCodeInvalidArgument(_, _, _) => "Argument mismatch in OpCode.",
+                OpCodeInvalidContainerReference(_, _, _, _) => "Container mismatch in OpCode.",
+                UnescapedStringLiteralIsContainer(_, _) => "Expected String literal is also a container."
             }
         }
     }
@@ -94,7 +97,7 @@ pub mod ill {
     impl IllError {
         pub fn name(&self) -> String {
             String::from(match *self {
-                RegisterRefinition(_, _) => "Register Redefinition",
+                RegisterRedefinition(_, _, _) => "Register Redefinition",
                 NoRegistersFound(_) => "No Register Found",
                 UnexpectedCharacter(_, _, _) => "Unexpected Character",
                 InstructionRedefinition(_, _) => "Instruction Redefinition",
@@ -102,8 +105,9 @@ pub mod ill {
                 InvalidOpCodeArguments(_, _) => "Invalid OpCode Instruction",
                 OpCodeArgumentMismatch(_, _, _, _) => "OpCode Argument Length Mismatch",
                 NoMainInstruction() => "No Main Instruction",
-                OpCodeInvalidArgument(_, _, _) => "Argument Mismatch"
-                OpCodeInvalidContainerRefrence(_, _, _, _) => "Container Mismatch"
+                OpCodeInvalidArgument(_, _, _) => "Argument Mismatch",
+                OpCodeInvalidContainerReference(_, _, _, _) => "Container Mismatch",
+                UnescapedStringLiteralIsContainer(_, _) => "Unescaped String Literal Misinterpreted",
             })
         }
     }
@@ -113,15 +117,16 @@ pub mod ill {
             fn fmt_rh(rh: &ReadHead) -> String {
                 format!("[{}:{}]", rh.line, rh.column)
             }
+            fn rr_ext(n: &Option<String>) -> String {
+                if n.is_some() { format!("(Shadowed by a {}.)", n.as_ref().unwrap()) } else { "".to_string() } }
             match *self {
-                RegisterRefinition(ref rh, ref name) => {
-                    write!(
-                        f,
-                        "Err@{} => The Register named \"{}\" already exists!",
-                        fmt_rh(rh),
-                        name
-                    )
-                }
+                RegisterRedefinition(ref rh, ref name, ref e_type) => write!(
+                    f,
+                    "Err@{} => The Register named \"{}\" already exists! {}",
+                    fmt_rh(rh),
+                    name,
+                    rr_ext(e_type)
+                ),
                 InstructionRedefinition(ref rh, ref name) => {
                     write!(
                         f,
@@ -165,7 +170,7 @@ pub mod ill {
                 OpCodeArgumentMismatch(ref rh, ref code, ref exp, ref given) => {
                     write!(
                         f,
-                        "Err@{} => \"{}\", invalid amount of arguments, expected {}, but received {}.",
+                        "Err@{} => \"{}\"; invalid amount of arguments. Expected {}, but received {}.",
                         fmt_rh(rh),
                         code,
                         exp,
@@ -179,9 +184,10 @@ pub mod ill {
                     write!(f, "Err@{} => Expected a {}, but got \"{}\" instead.", fmt_rh(rh), 
                     e_type.name(), got)
                 }
-                OpCodeInvalidContainerRefrence(ref rh, ref e_type, ref got, ref msg) => {
+                OpCodeInvalidContainerReference(ref rh, ref e_type, ref got, ref msg) => {
                     write!(f, "Err@{} => Expected a {}, but got \"{}\" instead: {}.", fmt_rh(rh), e_type.name(), got, msg)
                 }
+                UnescapedStringLiteralIsContainer(ref rh, ref got) => write!(f, "Err@{} => Found an unescaped String literal that is also a container (register / variable). Try using \"{}\".", fmt_rh(rh), got, )
             }
         }
     }
@@ -213,11 +219,11 @@ pub mod ill {
         }
     }
 
-    #[derive(Default, Debug)]
-    struct Instruction {
+    #[derive(Default, Debug, Clone)]
+    pub struct Instruction {
         name: String,
         codes: Vec<OpCode>,
-        scope: Vec<Register>,
+        pub scope: Vec<Register>,
         arguments: Vec<String>,
         is_main: bool,
     }
@@ -229,15 +235,27 @@ pub mod ill {
         fn does_scoped_register_exist(&self, name: String) -> bool {
             self.find_scoped_register(name).is_some() 
         }
+
+        fn execute(&mut self, debug: bool, registers: &Vec<Register>, o_insts: Vec<Instruction>) -> Result<(), IllError> {
+            for opcode in &self.codes {
+                let res = opcode.execute(debug, registers, o_insts.clone(), &mut self.scope);
+                if res.is_err() {
+                    return res
+                }
+
+            }
+            Ok(())
+        }
+
     }
 
     #[derive(Default)]
     pub struct Interpreter {
-        debug: bool,
+        pub debug: bool,
         files: Vec<EnhancedFile>,
         opcodes: Vec<OpCode>, // valid opcodes
-        registers: Vec<Register>,
-        instructions: Vec<Instruction>,
+        pub registers: Vec<Register>,
+        pub instructions: Vec<Instruction>,
     }
 
     #[derive(Default)]
@@ -297,8 +315,8 @@ pub mod ill {
                 println!("Making Interpreter with opcodes {:?}", opcodes);
             }
             Interpreter {
-                opcodes: opcodes,
-                debug: debug,
+                opcodes,
+                debug,
                 files: sources
                     .iter()
                     .map(|nf| {
@@ -315,7 +333,7 @@ pub mod ill {
                         EnhancedFile {
                             filename: nf.name.clone(),
                             file: clone,
-                            content: content,
+                            content,
                         }
                     })
                     .collect(),
@@ -323,12 +341,12 @@ pub mod ill {
             }
         }
 
-        fn find_Register(&self, name: String) -> Option<&Register> {
+        fn find_register(&self, name: String) -> Option<&Register> {
             self.registers.iter().find(|x: &&Register| x.identifier == name)
         }
 
         fn does_register_exist(&self, name: String) -> bool {
-            self.find_Register(name).is_some()
+            self.find_register(name).is_some()
         }
 
         fn find_instruction(&self, name: String) -> Option<&Instruction> {
@@ -370,6 +388,14 @@ pub mod ill {
                 arg.chars().find(|x| x.is_numeric()).is_none() // just make sure its [A-z]
             }
 
+            fn is_container(instruc: &Instruction, int: &Interpreter, ctx: String) -> bool {
+                int.does_register_exist(ctx.clone()) || instruc.does_scoped_register_exist(ctx)
+            }
+
+            fn strip_quotes(str: String) -> String {
+                str.replace("\"", "")
+            }
+
             let name = opcode.name.clone();
             let mut exp_args = opcode.arguments.clone();
             let mut act_args: Vec<ExpressionType> = Vec::new();
@@ -385,24 +411,29 @@ pub mod ill {
                                 r_literal(0),
                                 argument.clone()
                             ));
-                        } else { // See if I can do this by refrence? (looks to be too complicated, I don't want to have to use refcells)
+                        } else { // See if I can do this by Reference? (looks to be too complicated, I don't want to have to use refcells)
                             act_args.push(ExpressionType::IntegerLiteral(argument.parse::<usize>().unwrap()));
                         }
                     }
 
                     ExpressionType::StringLiteral(_) => {
-                        if !is_arg_string(argument.clone()) {
+                        if is_container(inst, self, argument.clone()) {
+                            return Err(UnescapedStringLiteralIsContainer(
+                                error_rh,
+                                argument.clone()
+                            ));
+                        } else if !is_arg_string(argument.clone()) {
                             return Err(OpCodeInvalidArgument(
                                 error_rh,
                                 s_literal(),
                                 argument.clone()
                             ));
                         } else {
-                            act_args.push(ExpressionType::StringLiteral(argument.clone()))
+                            act_args.push(ExpressionType::StringLiteral(strip_quotes(argument.clone())))
                         }
                     }
 
-                    ExpressionType::ContainerRefrence(_) => {
+                    ExpressionType::ContainerReference(_) => {
                         if !self.does_register_exist(argument.clone()) && !inst.does_scoped_register_exist(argument.clone()) {
                             return Err(OpCodeInvalidArgument(
                                 error_rh,
@@ -410,10 +441,10 @@ pub mod ill {
                                 argument.clone()
                             ))
                         } else {
-                            act_args.push(ExpressionType::ContainerRefrence(argument.clone()))
+                            act_args.push(ExpressionType::ContainerReference(argument.clone()))
                         }
                     }
-                    ExpressionType::RegisterRefrence(_) => {
+                    ExpressionType::RegisterReference(_) => {
                         if !self.does_register_exist(argument.clone()) {
                             return Err(OpCodeInvalidArgument(
                                 error_rh,
@@ -421,11 +452,11 @@ pub mod ill {
                                 argument.clone()
                             ))
                         } else {
-                            act_args.push(ExpressionType::RegisterRefrence(argument.clone()))
+                            act_args.push(ExpressionType::RegisterReference(argument.clone()))
                         }
                     }
 
-                    ExpressionType::VariableRefrence(_, _) => {
+                    ExpressionType::VariableReference(_, _) => {
                         if !self.does_register_exist(argument.clone()) {
                             return Err(OpCodeInvalidArgument(
                                 error_rh,
@@ -433,7 +464,7 @@ pub mod ill {
                                 argument.clone()
                             ))
                         } else {
-                            act_args.push(ExpressionType::VariableRefrence(inst.name.clone(), argument.clone()))
+                            act_args.push(ExpressionType::VariableReference(inst.name.clone(), argument.clone()))
                         }
                     }
                 }
@@ -443,11 +474,11 @@ pub mod ill {
             Ok(OpCode {
                 name: code_name,
                 arguments: act_args,
+                location: Some(error_rh) // error readhead is also where the beinning of the opcode.
             })
         }
 
         fn scan_instructions(&mut self) -> Result<(), IllError> {
-
             fn read_inst_def(it: &mut Peekable<Chars>) -> (i32, i32, String) {
                 read_until(it, vec![INST_PARAM_BEGIN])
             }
@@ -473,8 +504,8 @@ pub mod ill {
                         }
                         if cur_inst_sb.is_reading_definition {
                             cur_inst.is_main = *it.peek().unwrap() == INST_DEF;
-                            let Register_name = traverse_read(&mut head, read_inst_def(it.by_ref()));
-                            cur_inst.name = Register_name;
+                            let register_name = traverse_read(&mut head, read_inst_def(it.by_ref()));
+                            cur_inst.name = register_name;
                             cur_inst_sb.is_reading_arguments = true;
                             let params_unsp =
                                 traverse_read(
@@ -508,9 +539,11 @@ pub mod ill {
                                     &mut it.clone(),
                                     vec![DEF_END],
                                     vec![INST_CODES_END],
-                                )
+                                ) || !any_exists_until(&mut it.clone(), vec![NEWLINE], vec![INST_CODES_END])
                                 {
                                     // break because no codes
+                                    return Err(IllError::UnexpectedCharacter(head, NEWLINE,                                 Some(String::from(" expecting OpCode terminator.")),
+                                    ));
                                     break;
                                 }
                                 if *it.peek().unwrap() == COMMENT_SINGLE_LINE {
@@ -548,7 +581,11 @@ pub mod ill {
                 self.instructions[0].is_main = true;
             }
             println!("insts = {:?}", self.instructions);
-            Ok(())
+            // inst.execute(debug, &self.registers, &self.instructions);
+            let inst_clone = self.instructions.clone();
+            let mut_inst: &mut Vec<Instruction> = self.instructions.as_mut();
+            let inst = mut_inst.iter_mut().find(|x| x.is_main).unwrap();
+            inst.execute(self.debug, &self.registers, inst_clone)
         }
 
         fn create_registers(&mut self) -> Result<(), IllError> {
@@ -560,19 +597,19 @@ pub mod ill {
                 while let Some(x) = iter.next() {
                     head.advance(x);
                     if !x.is_whitespace() {
-                        if x == Register_DEF {
+                        if x == REGISTER_DEF {
                             has_found_registers = true;
                             while iter.peek().is_some() && *iter.peek().unwrap() != NEWLINE {
-                                let Register_name = traverse_read(
+                                let register_name = traverse_read(
                                     &mut head,
                                     read_until(iter.by_ref(), vec![DEF_END]),
                                 );
-                                if self.does_register_exist(Register_name.clone()) {
-                                    let err_str = Register_name.clone();
-                                    return Err(RegisterRefinition(head, err_str));
+                                if self.does_register_exist(register_name.clone()) {
+                                    let err_str = register_name.clone();
+                                    return Err(RegisterRedefinition(head, err_str, None));
                                 }
                                 self.registers.push(Register {
-                                    identifier: Register_name,
+                                    identifier: register_name,
                                     is_variable: false,
                                     ..Default::default()
                                 });
@@ -590,18 +627,19 @@ pub mod ill {
             Ok(())
         }
 
-        pub fn begin_parsing(&mut self) -> Result<(), IllError> {
+        pub fn begin_parsing(&mut self) -> Option<IllError> {
             let res = self.create_registers();
             if res.is_err() {
-                return res;
+                return res.err();
             }
+
+            let debug = self.debug;
 
             let res = self.scan_instructions();
             if res.is_err() {
-                return res;
+                return res.err()
             }
-
-            Ok(())
+            None
         }
     }
 }

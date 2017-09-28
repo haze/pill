@@ -48,13 +48,13 @@ fn main() {
         .collect();
 
     let mut int: Interpreter = Interpreter::new(arg_matches.is_present("debug"), input_files, opcodes::ill::default_opcodes());
-    let mut res: Result<(), IllError> = Ok(());
+    let mut res: Option<IllError> = None;
     let dur = Duration::span(|| { res = int.begin_parsing(); });
 
     let mut out = StandardStream::stdout(ColorChoice::Always);
 
-    if res.is_err() {
-        let err = res.err().unwrap();
+    if res.is_some() {
+        let err = res.unwrap();
         out.set_color(ColorSpec::new().set_fg(Some(Color::Red)))
             .ok();
         write!(&mut out, "{}", err.name()).ok();

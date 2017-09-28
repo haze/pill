@@ -1,15 +1,17 @@
-
 pub mod ill {
-    use interpreter::ill::Register;
+    use interpreter::ill::{ReadHead, Register, Interpreter, Instruction, IllError};
     use opcodes::ill::ExpressionType::*;
+    use std::default::Default;
 
     #[derive(Debug, Clone)]
     pub enum ExpressionType {
         IntegerLiteral(usize),
         StringLiteral(String),
-        ContainerRefrence(String), // both stacks and variables, no difference (Will search current instruction before searching registers)
-        RegisterRefrence(String), // Stack Name
-        VariableRefrence(String, String) // Instruction Name, Variable Name
+        ContainerReference(String),
+        // both stacks and variables, no difference (Will search current instruction before searching registers)
+        RegisterReference(String),
+        // Stack Name
+        VariableReference(String, String) // Instruction Name, Variable Name
     }
 
 
@@ -17,9 +19,9 @@ pub mod ill {
         pub fn name(&self) -> String {
             String::from(match *self {
                 IntegerLiteral(_) => "Integer Literal",
-                ContainerRefrence(_) => "Container Refrence",
-                RegisterRefrence(_) => "Register Refrence",
-                VariableRefrence(_, _) => "Variable Refrence",
+                ContainerReference(_) => "Container Reference",
+                RegisterReference(_) => "Register Reference",
+                VariableReference(_, _) => "Variable Reference",
                 StringLiteral(_) => "String Literal"
             })
         }
@@ -30,15 +32,15 @@ pub mod ill {
     }
 
     pub fn container() -> ExpressionType {
-        ExpressionType::ContainerRefrence(String::new())
+        ExpressionType::ContainerReference(String::new())
     }
 
     pub fn register() -> ExpressionType {
-        ExpressionType::RegisterRefrence(String::new())
+        ExpressionType::RegisterReference(String::new())
     }
 
     pub fn variable() -> ExpressionType {
-        ExpressionType::VariableRefrence(String::new(), String::new())
+        ExpressionType::VariableReference(String::new(), String::new())
     }
 
     pub fn s_literal() -> ExpressionType {
@@ -46,9 +48,13 @@ pub mod ill {
     }
 
     pub fn r_literal(it: usize) -> ExpressionType { ExpressionType::IntegerLiteral(it) }
-    pub fn r_container(it: String) -> ExpressionType { ExpressionType::ContainerRefrence(it) }
-    pub fn r_register(it: String) -> ExpressionType { ExpressionType::RegisterRefrence(it) }
-    pub fn r_variable(inst_name: String, it: String) -> ExpressionType { ExpressionType::VariableRefrence(inst_name, it) }
+
+    pub fn r_container(it: String) -> ExpressionType { ExpressionType::ContainerReference(it) }
+
+    pub fn r_register(it: String) -> ExpressionType { ExpressionType::RegisterReference(it) }
+
+    pub fn r_variable(inst_name: String, it: String) -> ExpressionType { ExpressionType::VariableReference(inst_name, it) }
+
     pub fn r_string(it: String) -> ExpressionType { ExpressionType::StringLiteral(it) }
 
     pub fn do_opcode(code: OpCode) {
@@ -62,12 +68,22 @@ pub mod ill {
         opcodes.push(OpCode::new("mak").expecting(s_literal()).expecting(literal()));
         opcodes.push(OpCode::new("cop").expecting(container()).expecting(container()));
         opcodes
-    }
+    } // lol why the FUCCC didnt i use enums kekekekekkekkekekekekek ??
+    // i remember now cuz LOL DESTRUCTORS LOL FUNCTIONS LOL OL PLFOL oj ej jknlsnf hehehah fdsfasdklf
+    // im in some office building rn and im pseudo-bogging in this code hahahahahahaha what other CRAZY ass developers do this ? ?? hahahahaa
+    // lol time to finish writing this stpid code ((i founda BUGGAroo))
+    // the fkn thing just sits and stares when it fins an opcode that like, isnt terminated so.....
+
+
+    // hehe i just fixd that BUG squashed that NOOB lol
+    // everyone left the office and its so serene..........
+
 
     #[derive(Default, Debug, Clone)]
     pub struct OpCode {
         pub name: String,
         pub arguments: Vec<ExpressionType>,
+        pub location: Option<ReadHead>
     }
 
     impl OpCode {
@@ -95,7 +111,29 @@ pub mod ill {
                 ..self
             }
         }
+        pub fn execute(&self, debug: bool, registers: &Vec<Register>, o_insts: Vec<Instruction>, scope: &mut Vec<Register>) -> Result<(), IllError> {
+            let rh_err: ReadHead = self.location.unwrap().clone();
+            match &*self.name.to_lowercase() {
+                "mak" => {
+                    if let ExpressionType::StringLiteral(ref identifier) = self.arguments[0] {
+                        if registers.iter().find(|x| x.identifier == *identifier).is_some() {
+                            return Err(IllError::RegisterRedefinition(rh_err, identifier.clone(), Some(register().name())));
+                        } else if scope.iter().find(|x| x.identifier == identifier.clone()).is_some() {
+                            return Err(IllError::RegisterRedefinition(rh_err, identifier.clone(), Some(variable().name())));
+                        }
+                        if let ExpressionType::IntegerLiteral(value) = self.arguments[1] {
+                            scope.push(Register { identifier: identifier.clone(), value, is_variable: true });
+                            if debug {
+                                println!("Added variable {} => {}", identifier, value);
+                            }
+                        }
+                    }
+                },
+                "mov" => (),
+                "cop" => (),
+                _ => ()
+            }
+            Ok(())
+        }
     }
-
-
 }

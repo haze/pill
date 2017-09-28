@@ -1,7 +1,8 @@
-+a;
++a; b;
 
 $$ () {
-
+    mov 1 a
+    mov 2 b;
 }
 
 $anis (a) {
