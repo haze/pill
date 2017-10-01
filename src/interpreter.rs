@@ -13,7 +13,7 @@ pub mod ill {
 
     use NamedFile;
     use IllError::*;
-
+    const TAB: char = ' ';
     const NEWLINE: char = '\n';
     const REGISTER_DEF: char = '+';
     const DEF_END: char = ';';
@@ -28,8 +28,8 @@ pub mod ill {
     const INST_CODES_BEGIN: char = '{';
     const INST_CODES_END: char = '}';
 
-    // commands
-    const COMMENT_SINGLE_LINE: char = '|';
+    // comments
+    const COMMENT_SINGLE_LINE: char = '>';
 
     #[derive(Default, Debug, Clone)]
     pub struct Register {
@@ -73,7 +73,9 @@ pub mod ill {
         NoMainInstruction(),
         OpCodeInvalidArgument(ReadHead, ExpressionType, String), // wanted, got
         OpCodeInvalidContainerReference(ReadHead, ExpressionType, String, String),
-        UnescapedStringLiteralIsContainer(ReadHead, String)
+        UnescapedStringLiteralIsContainer(ReadHead, String),
+        NonExistentRegister(ReadHead, String),
+        ImmutableRegister(ReadHead, String),
     }
 
     impl Error for IllError {
@@ -89,7 +91,9 @@ pub mod ill {
                 NoMainInstruction() => "No Main Instruction was found.",
                 OpCodeInvalidArgument(_, _, _) => "Argument mismatch in OpCode.",
                 OpCodeInvalidContainerReference(_, _, _, _) => "Container mismatch in OpCode.",
-                UnescapedStringLiteralIsContainer(_, _) => "Expected String literal is also a container."
+                UnescapedStringLiteralIsContainer(_, _) => "Expected String literal is also a container.",
+                NonExistentRegister(_, _) => "Register does not exist.",
+                ImmutableRegister(_, _) => "Register cannot be mutated.",
             }
         }
     }
@@ -108,6 +112,8 @@ pub mod ill {
                 OpCodeInvalidArgument(_, _, _) => "Argument Mismatch",
                 OpCodeInvalidContainerReference(_, _, _, _) => "Container Mismatch",
                 UnescapedStringLiteralIsContainer(_, _) => "Unescaped String Literal Misinterpreted",
+                NonExistentRegister(_, _) => "The Register provided does not exist globally or locally",
+                ImmutableRegister(_, _) => "The Register is immutable."
             })
         }
     }
@@ -145,7 +151,7 @@ pub mod ill {
                 UnexpectedCharacter(ref rh, ch, ref exp) => {
                     write!(
                         f,
-                        "Err@{} => Found unexpected character {}{}",
+                        "Err@{} => Found unexpected character {:?}{}",
                         fmt_rh(&rh),
                         ch,
                         exp.as_ref().unwrap_or(&String::from("."))
@@ -181,13 +187,15 @@ pub mod ill {
                     write!(f, "No Main instruction was found for any input files.")
                 }
                 OpCodeInvalidArgument(ref rh, ref e_type, ref got) => {
-                    write!(f, "Err@{} => Expected a {}, but got \"{}\" instead.", fmt_rh(rh), 
+                    write!(f, "Err@{} => Expected a {}, but got \"{}\" instead.", fmt_rh(rh),
                     e_type.name(), got)
                 }
                 OpCodeInvalidContainerReference(ref rh, ref e_type, ref got, ref msg) => {
                     write!(f, "Err@{} => Expected a {}, but got \"{}\" instead: {}.", fmt_rh(rh), e_type.name(), got, msg)
                 }
-                UnescapedStringLiteralIsContainer(ref rh, ref got) => write!(f, "Err@{} => Found an unescaped String literal that is also a container (register / variable). Try using \"{}\".", fmt_rh(rh), got, )
+                UnescapedStringLiteralIsContainer(ref rh, ref got) => write!(f, "Err@{} => Found an unescaped String literal that is also a container (register / variable). Try using \"{}\".", fmt_rh(rh), got),
+                NonExistentRegister(ref rh, ref name) => write!(f, "Err@{} => The container {} does not exist globally nor locally.", fmt_rh(rh), name),
+                ImmutableRegister(ref rh, ref name) => write!(f, "Err@{} => The register modified here {:?} is immutable.", fmt_rh(rh), name)
             }
         }
     }
@@ -233,10 +241,10 @@ pub mod ill {
             self.scope.iter().find(|&x| x.identifier == name)
         }
         fn does_scoped_register_exist(&self, name: String) -> bool {
-            self.find_scoped_register(name).is_some() 
+            self.find_scoped_register(name).is_some()
         }
 
-        fn execute(&mut self, debug: bool, registers: &Vec<Register>, o_insts: Vec<Instruction>) -> Result<(), IllError> {
+        fn execute(&mut self, debug: bool, registers: &mut Vec<Register>, o_insts: Vec<Instruction>) -> Result<(), IllError> {
             for opcode in &self.codes {
                 let res = opcode.execute(debug, registers, o_insts.clone(), &mut self.scope);
                 if res.is_err() {
@@ -265,6 +273,10 @@ pub mod ill {
         is_reading_codes: bool,
     }
 
+    fn dump_all_until_any(head: &mut ReadHead, it: &mut Peekable<Chars>, ch: Vec<char>) {
+        traverse_read(head, read_all_until_any(it, ch));
+    }
+
     fn dump_until(head: &mut ReadHead, it: &mut Peekable<Chars>, ch: Vec<char>) {
         let _ = traverse_read(head, read_until_spare_ws(it, ch));
     }
@@ -279,6 +291,18 @@ pub mod ill {
         x.chars().filter(|x| *x == NEWLINE).count() as i32
     }
 
+
+        // because fuck iterators
+    fn read_all_until_any(it: &mut Peekable<Chars>, ch: Vec<char>) -> (i32, i32, String) {
+
+        let z = it.take_while(|c| ch.contains(c)).collect::<String>();
+        let nl = newlines(&z);
+        (
+            nl,
+            z.len() as i32 - nl,
+            z,
+        )
+    }
     fn read_until(it: &mut Peekable<Chars>, ch: Vec<char>) -> (i32, i32, String) {
         let z = it.take_while(|c| !ch.contains(c)).collect::<String>();
         let nl = newlines(&z);
@@ -305,7 +329,7 @@ pub mod ill {
         fn find_opcode(&self, name: String) -> Option<&OpCode> {
             self.opcodes.iter().find(|x: &&OpCode| x.name == name)
         }
-        
+
         fn does_opcode_exist(&self, name: String) -> bool {
             self.find_opcode(name).is_some()
         }
@@ -328,7 +352,7 @@ pub mod ill {
                         let sz = clone.read_to_string(&mut content).unwrap_or(0);
                         if debug {
                             println!("[:] read {} bytes for {:?}", sz, nf.file);
-                            println!("content = `{}`", content);
+                            println!("[:] content = `{:?}`", content);
                         }
                         EnhancedFile {
                             filename: nf.name.clone(),
@@ -402,7 +426,9 @@ pub mod ill {
             for i in 0 .. exp_args.len() {
                 let expected = exp_args[i].clone();
                 let ref argument = data[i + 1];
-                println!("arg = {}, expected = {:?}", argument, expected);
+                if self.debug {
+                    println!("arg = {}, expected = {:?}", argument, expected);
+                }
                 match expected {
                     ExpressionType::IntegerLiteral(_) => {
                         if !is_arg_literal(argument.clone()) {
@@ -434,43 +460,19 @@ pub mod ill {
                     }
 
                     ExpressionType::ContainerReference(_) => {
-                        if !self.does_register_exist(argument.clone()) && !inst.does_scoped_register_exist(argument.clone()) {
-                            return Err(OpCodeInvalidArgument(
-                                error_rh,
-                                r_container(String::new()),
-                                argument.clone()
-                            ))
-                        } else {
-                            act_args.push(ExpressionType::ContainerReference(argument.clone()))
-                        }
+                        act_args.push(ExpressionType::ContainerReference(argument.clone()))
                     }
                     ExpressionType::RegisterReference(_) => {
-                        if !self.does_register_exist(argument.clone()) {
-                            return Err(OpCodeInvalidArgument(
-                                error_rh,
-                                r_register(String::new()),
-                                argument.clone()
-                            ))
-                        } else {
-                            act_args.push(ExpressionType::RegisterReference(argument.clone()))
-                        }
+                        act_args.push(ExpressionType::RegisterReference(argument.clone()))
                     }
 
                     ExpressionType::VariableReference(_, _) => {
-                        if !self.does_register_exist(argument.clone()) {
-                            return Err(OpCodeInvalidArgument(
-                                error_rh,
-                                r_variable(String::new(), String::new()),
-                                argument.clone()
-                            ))
-                        } else {
-                            act_args.push(ExpressionType::VariableReference(inst.name.clone(), argument.clone()))
-                        }
+                        act_args.push(ExpressionType::VariableReference(inst.name.clone(), argument.clone()))
                     }
                 }
             }
 
-                
+
             Ok(OpCode {
                 name: code_name,
                 arguments: act_args,
@@ -526,7 +528,7 @@ pub mod ill {
                             {
                                 return Err(UnexpectedCharacter(
                                     head,
-                                    x,
+                                    *it.peek().unwrap(), // TODO: Change back into x if we need to.
                                     Some(format!(
                                         " expecting instruction code beginning \"{}\".",
                                         INST_CODES_BEGIN
@@ -535,31 +537,41 @@ pub mod ill {
                             }
                             dump_until(&mut head, it.by_ref(), vec![INST_CODES_BEGIN]);
                             while it.peek().is_some() && *it.peek().unwrap() != INST_CODES_END {
+                                if it.clone().collect::<String>().contains(COMMENT_SINGLE_LINE) {
+                                    let x = traverse_read(&mut head, read_all_until_any(it.by_ref(), vec![NEWLINE, TAB, COMMENT_SINGLE_LINE]));
+                                    if x.contains(COMMENT_SINGLE_LINE) {
+                                        dump_until(&mut head, it.by_ref(), vec![NEWLINE]);
+                                    }
+                                }
+
+                                let chars = it.clone().collect::<String>();
+                                if *it.peek().unwrap() == COMMENT_SINGLE_LINE {
+                                    dump_until(&mut head, it.by_ref(), vec![NEWLINE]);
+                                }
                                 if !any_exists_until(
                                     &mut it.clone(),
                                     vec![DEF_END],
                                     vec![INST_CODES_END],
-                                ) || !any_exists_until(&mut it.clone(), vec![NEWLINE], vec![INST_CODES_END])
-                                {
-                                    // break because no codes
-                                    return Err(IllError::UnexpectedCharacter(head, NEWLINE,                                 Some(String::from(" expecting OpCode terminator.")),
-                                    ));
-                                    break;
-                                }
-                                if *it.peek().unwrap() == COMMENT_SINGLE_LINE {
-                                    dump_until(&mut head, it.by_ref(), vec![NEWLINE]);
-                                }
+                                )
+                                    {
+                                        // break because no codes
+                                        break;
+                                    }
+
                                 let raw_code = traverse_read(
                                     &mut head,
                                     read_until_spare_ws(it.by_ref(), vec![DEF_END]),
                                 );
                                 let code = String::from(raw_code.trim());
+
                                 let res = self.parse_code(head.clone(), &cur_inst, code.clone());
                                 if res.is_err() {
                                     return Err(res.err().unwrap());
                                 }
                                 cur_inst.codes.push(res.ok().unwrap());
-                                println!("found code \"{}\"", code);
+                                if self.debug {
+                                    println!("found code {:?}", code);
+                                }
                             }
                             cur_inst_sb.is_reading_codes = false;
                             if self.does_instruction_exist(cur_inst.name.clone()) {
@@ -580,12 +592,14 @@ pub mod ill {
             } else if self.instructions.len() == 1 {
                 self.instructions[0].is_main = true;
             }
-            println!("insts = {:?}", self.instructions);
+            if self.debug {
+                println!("insts = {:?}", self.instructions);
+            }
             // inst.execute(debug, &self.registers, &self.instructions);
             let inst_clone = self.instructions.clone();
             let mut_inst: &mut Vec<Instruction> = self.instructions.as_mut();
             let inst = mut_inst.iter_mut().find(|x| x.is_main).unwrap();
-            inst.execute(self.debug, &self.registers, inst_clone)
+            inst.execute(self.debug, &mut self.registers, inst_clone)
         }
 
         fn create_registers(&mut self) -> Result<(), IllError> {
@@ -639,6 +653,14 @@ pub mod ill {
             if res.is_err() {
                 return res.err()
             }
+
+            if self.debug {
+                println!("end_registers = {:?}", self.registers);
+                for inst in &self.instructions {
+                    println!("{}'s registers: {:?}", inst.name, inst.scope);
+                }
+            }
+
             None
         }
     }

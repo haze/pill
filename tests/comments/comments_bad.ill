@@ -1,4 +1,6 @@
 +a;b;c;
-| this is supposed to shadow the main function
-< asdf
-$$ () { }
+
+$$ () {
+    < this is supposed to shadow the main function
+    mov a 1;
+}

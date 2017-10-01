@@ -66,7 +66,7 @@ pub mod ill {
         let mut opcodes: Vec<OpCode> = Vec::new();
         opcodes.push(OpCode::new("mov").expecting(literal()).expecting(container()));
         opcodes.push(OpCode::new("mak").expecting(s_literal()).expecting(literal()));
-        opcodes.push(OpCode::new("cop").expecting(container()).expecting(container()));
+        opcodes.push(OpCode::new("dis").expecting(container()));
         opcodes
     } // lol why the FUCCC didnt i use enums kekekekekkekkekekekekek ??
     // i remember now cuz LOL DESTRUCTORS LOL FUNCTIONS LOL OL PLFOL oj ej jknlsnf hehehah fdsfasdklf
@@ -111,14 +111,26 @@ pub mod ill {
                 ..self
             }
         }
-        pub fn execute(&self, debug: bool, registers: &Vec<Register>, o_insts: Vec<Instruction>, scope: &mut Vec<Register>) -> Result<(), IllError> {
+
+        fn register_exists(&self, name: String, global: bool, registers: Option<&Vec<Register>>, scope: Option<&mut Vec<Register>>) -> bool {
+            if global {
+                return registers.unwrap().iter().find(|x| x.identifier == *name).is_some();
+            } else {
+                return scope.unwrap().iter().find(|x| x.identifier == *name).is_some();
+            }
+        }
+        fn g_register_exists(&self, name: String, g_registers: &Vec<Register>) -> bool { self.register_exists(name, true, Some(g_registers), None) }
+        fn l_register_exists(&self, name: String, scope: &mut Vec<Register>) -> bool { self.register_exists(name, false, None, Some(scope)) }
+
+
+        pub fn execute(&self, debug: bool, registers: &mut Vec<Register>, o_insts: Vec<Instruction>, scope: &mut Vec<Register>) -> Result<(), IllError> {
             let rh_err: ReadHead = self.location.unwrap().clone();
             match &*self.name.to_lowercase() {
                 "mak" => {
                     if let ExpressionType::StringLiteral(ref identifier) = self.arguments[0] {
-                        if registers.iter().find(|x| x.identifier == *identifier).is_some() {
+                        if self.g_register_exists(identifier.clone(), registers) {
                             return Err(IllError::RegisterRedefinition(rh_err, identifier.clone(), Some(register().name())));
-                        } else if scope.iter().find(|x| x.identifier == identifier.clone()).is_some() {
+                        } else if self.l_register_exists(identifier.clone(), scope) {
                             return Err(IllError::RegisterRedefinition(rh_err, identifier.clone(), Some(variable().name())));
                         }
                         if let ExpressionType::IntegerLiteral(value) = self.arguments[1] {
@@ -128,9 +140,42 @@ pub mod ill {
                             }
                         }
                     }
-                },
-                "mov" => (),
-                "cop" => (),
+                }
+                "mov" => {
+                    if let ExpressionType::IntegerLiteral(ref value) = self.arguments[0] {
+                        if let ExpressionType::ContainerReference(ref identifier) = self.arguments[1] {
+                            if !self.g_register_exists(identifier.clone(), registers) {
+                                if !self.l_register_exists(identifier.clone(), scope) {
+                                    return Err(IllError::NonExistentRegister(rh_err, identifier.clone())); // Error is implemented but will never be thrown because the it wont compile if the register doesnt exist
+                                } else {
+                                    let reg = scope.iter_mut().find(|x| x.identifier == *identifier).unwrap();
+                                    reg.value = *value as usize;
+                                }
+                            } else {
+                                if debug {
+                                    println!("Moved {} onto {}.", value, identifier);
+                                }
+                                let reg = registers.iter_mut().find(|x| x.identifier == *identifier).unwrap();
+                                reg.value = *value as usize;
+                            }
+                        }
+                    }
+                }
+                "dis" => {
+                    if let ExpressionType::ContainerReference(ref identifier) = self.arguments[0] {
+                        let mut value: usize = 0;
+                        if !self.g_register_exists(identifier.clone(), registers) {
+                            if !self.l_register_exists(identifier.clone(), scope) {
+                                return Err(IllError::NonExistentRegister(rh_err, identifier.clone()));
+                            } else {
+                                value = scope.iter().find(|x| x.identifier == *identifier).unwrap().value;
+                            }
+                        } else {
+                            value = registers.iter().find(|x| x.identifier == *identifier).unwrap().value;
+                        }
+                        println!("{} = {}", identifier, value);
+                    }
+                }
                 _ => ()
             }
             Ok(())
