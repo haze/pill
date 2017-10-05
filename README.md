@@ -1,6 +1,6 @@
-# pill
+<img src="https://cdn.rawgit.com/hvze/pill/7563861d/images/pill_logo.svg" width=55/> 
 
-![Logo](/images/pill_logo.svg | width=75)
+# pill
 
 The (Pretty) Ill Programming Language's Rust Interpreter
 
