@@ -2,5 +2,5 @@
 
 $$ () {
     mov 1 a;
-    mov 2 b;
+    mov 2 a;
 }

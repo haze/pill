@@ -8,11 +8,12 @@ pub mod ill {
     use std::fmt::{Display, Formatter};
 
     use opcodes::ill::OpCode;
-    use opcodes::ill::ExpressionType;
+    use opcodes::ill::{ExpressionType};
     use opcodes::ill::{s_literal, r_container, r_literal, r_register, r_variable};
 
     use NamedFile;
     use IllError::*;
+
     const TAB: char = ' ';
     const NEWLINE: char = '\n';
     const REGISTER_DEF: char = '+';
@@ -71,11 +72,14 @@ pub mod ill {
         InvalidOpCodeArguments(ReadHead, String),
         OpCodeArgumentMismatch(ReadHead, String, i32, i32),
         NoMainInstruction(),
-        OpCodeInvalidArgument(ReadHead, ExpressionType, String), // wanted, got
+        OpCodeInvalidArgument(ReadHead, ExpressionType, String),
+        // wanted, got
         OpCodeInvalidContainerReference(ReadHead, ExpressionType, String, String),
         UnescapedStringLiteralIsContainer(ReadHead, String),
         NonExistentRegister(ReadHead, String),
+        NonExistentInstruction(ReadHead, String),
         ImmutableRegister(ReadHead, String),
+
     }
 
     impl Error for IllError {
@@ -93,6 +97,7 @@ pub mod ill {
                 OpCodeInvalidContainerReference(_, _, _, _) => "Container mismatch in OpCode.",
                 UnescapedStringLiteralIsContainer(_, _) => "Expected String literal is also a container.",
                 NonExistentRegister(_, _) => "Register does not exist.",
+                NonExistentInstruction(_, _) => "Instruction does not exist.",
                 ImmutableRegister(_, _) => "Register cannot be mutated.",
             }
         }
@@ -112,7 +117,8 @@ pub mod ill {
                 OpCodeInvalidArgument(_, _, _) => "Argument Mismatch",
                 OpCodeInvalidContainerReference(_, _, _, _) => "Container Mismatch",
                 UnescapedStringLiteralIsContainer(_, _) => "Unescaped String Literal Misinterpreted",
-                NonExistentRegister(_, _) => "The Register provided does not exist globally or locally",
+                NonExistentRegister(_, _) => "Non-Existent Register",
+                NonExistentInstruction(_, _) => "Non-Existent Instruction",
                 ImmutableRegister(_, _) => "The Register is immutable."
             })
         }
@@ -124,7 +130,8 @@ pub mod ill {
                 format!("[{}:{}]", rh.line, rh.column)
             }
             fn rr_ext(n: &Option<String>) -> String {
-                if n.is_some() { format!("(Shadowed by a {}.)", n.as_ref().unwrap()) } else { "".to_string() } }
+                if n.is_some() { format!("(Shadowed by a {}.)", n.as_ref().unwrap()) } else { "".to_string() }
+            }
             match *self {
                 RegisterRedefinition(ref rh, ref name, ref e_type) => write!(
                     f,
@@ -188,13 +195,14 @@ pub mod ill {
                 }
                 OpCodeInvalidArgument(ref rh, ref e_type, ref got) => {
                     write!(f, "Err@{} => Expected a {}, but got \"{}\" instead.", fmt_rh(rh),
-                    e_type.name(), got)
+                           e_type.name(), got)
                 }
                 OpCodeInvalidContainerReference(ref rh, ref e_type, ref got, ref msg) => {
                     write!(f, "Err@{} => Expected a {}, but got \"{}\" instead: {}.", fmt_rh(rh), e_type.name(), got, msg)
                 }
                 UnescapedStringLiteralIsContainer(ref rh, ref got) => write!(f, "Err@{} => Found an unescaped String literal that is also a container (register / variable). Try using \"{}\".", fmt_rh(rh), got),
                 NonExistentRegister(ref rh, ref name) => write!(f, "Err@{} => The container {} does not exist globally nor locally.", fmt_rh(rh), name),
+                NonExistentInstruction(ref rh, ref name) => write!(f, "Err@{} => The instruction {} does not exist.", fmt_rh(rh), name),
                 ImmutableRegister(ref rh, ref name) => write!(f, "Err@{} => The register modified here {:?} is immutable.", fmt_rh(rh), name)
             }
         }
@@ -229,7 +237,7 @@ pub mod ill {
 
     #[derive(Default, Debug, Clone)]
     pub struct Instruction {
-        name: String,
+        pub name: String,
         codes: Vec<OpCode>,
         pub scope: Vec<Register>,
         arguments: Vec<String>,
@@ -244,24 +252,34 @@ pub mod ill {
             self.find_scoped_register(name).is_some()
         }
 
-        fn execute(&mut self, debug: bool, registers: &mut Vec<Register>, o_insts: Vec<Instruction>) -> Result<(), IllError> {
-            for opcode in &self.codes {
-                let res = opcode.execute(debug, registers, o_insts.clone(), &mut self.scope);
-                if res.is_err() {
-                    return res
-                }
 
+        pub fn c_execute(&mut self, debug: bool, registers: &mut Vec<Register>, o_insts: Vec<Instruction>, c_scope: &mut Vec<Register>) -> Result<(), IllError> {
+            for opcode in &self.codes {
+                let res = opcode.execute(debug, registers, o_insts.clone(), c_scope);
+                if res.is_err() {
+                    return res;
+                }
             }
             Ok(())
         }
 
+        pub fn execute(&mut self, debug: bool, registers: &mut Vec<Register>, o_insts: Vec<Instruction>) -> Result<(), IllError> {
+            for opcode in &self.codes {
+                let res = opcode.execute(debug, registers, o_insts.clone(), &mut self.scope);
+                if res.is_err() {
+                    return res;
+                }
+            }
+            Ok(())
+        }
     }
 
     #[derive(Default)]
     pub struct Interpreter {
         pub debug: bool,
         files: Vec<EnhancedFile>,
-        opcodes: Vec<OpCode>, // valid opcodes
+        opcodes: Vec<OpCode>,
+        // valid opcodes
         pub registers: Vec<Register>,
         pub instructions: Vec<Instruction>,
     }
@@ -292,9 +310,8 @@ pub mod ill {
     }
 
 
-        // because fuck iterators
+    // because fuck iterators
     fn read_all_until_any(it: &mut Peekable<Chars>, ch: Vec<char>) -> (i32, i32, String) {
-
         let z = it.take_while(|c| ch.contains(c)).collect::<String>();
         let nl = newlines(&z);
         (
@@ -303,6 +320,7 @@ pub mod ill {
             z,
         )
     }
+
     fn read_until(it: &mut Peekable<Chars>, ch: Vec<char>) -> (i32, i32, String) {
         let z = it.take_while(|c| !ch.contains(c)).collect::<String>();
         let nl = newlines(&z);
@@ -383,7 +401,7 @@ pub mod ill {
             self.find_instruction(name).is_some()
         }
 
-        fn parse_code(&self, rh: ReadHead, inst: &Instruction, code: String) -> Result<OpCode, IllError> {
+        fn parse_code(&self, rh: ReadHead, inst: &Instruction, insts: &Vec<Instruction>, code: String) -> Result<OpCode, IllError> {
             let data: Vec<String> = code.split(' ').map(String::from).collect::<Vec<String>>();
             let code_name = data[0].clone();
             let nls = newlines(&code) as usize;
@@ -423,22 +441,30 @@ pub mod ill {
             let name = opcode.name.clone();
             let mut exp_args = opcode.arguments.clone();
             let mut act_args: Vec<ExpressionType> = Vec::new();
-            for i in 0 .. exp_args.len() {
-                let expected = exp_args[i].clone();
+            for i in 0..exp_args.len() {
+                let expected = exp_args[i].clone().into();
                 let ref argument = data[i + 1];
                 if self.debug {
                     println!("arg = {}, expected = {:?}", argument, expected);
                 }
+
                 match expected {
                     ExpressionType::IntegerLiteral(_) => {
-                        if !is_arg_literal(argument.clone()) {
-                            return Err(OpCodeInvalidArgument(
-                                error_rh,
-                                r_literal(0),
-                                argument.clone()
-                            ));
-                        } else { // See if I can do this by Reference? (looks to be too complicated, I don't want to have to use refcells)
-                            act_args.push(ExpressionType::IntegerLiteral(argument.parse::<usize>().unwrap()));
+                        if inst.does_scoped_register_exist(argument.clone()) {
+                            let reg = inst.find_scoped_register(argument.clone());
+                            act_args.push(ExpressionType::IntegerLiteral(reg.unwrap().value as usize));
+                        } else if self.does_register_exist(argument.clone()) {
+                            let reg = self.find_register(argument.clone());
+                            act_args.push(ExpressionType::IntegerLiteral(reg.unwrap().value as usize));
+                        } /*else if !is_arg_literal(argument.clone()) {
+                                return Err(OpCodeInvalidArgument(
+                                    error_rh,
+                                    r_literal(0),
+                                    argument.clone()
+                                ));
+                        } */ else {
+                                // See if I can do this by Reference? (looks to be too complicated, I don't want to have to use refcells)
+                                act_args.push(ExpressionType::IntegerLiteral(argument.parse::<usize>().unwrap()));
                         }
                     }
 
@@ -455,28 +481,45 @@ pub mod ill {
                                 argument.clone()
                             ));
                         } else {
-                            act_args.push(ExpressionType::StringLiteral(strip_quotes(argument.clone())))
+                            act_args.push(ExpressionType::StringLiteral(strip_quotes(argument.clone())));
                         }
                     }
 
                     ExpressionType::ContainerReference(_) => {
-                        act_args.push(ExpressionType::ContainerReference(argument.clone()))
+                        act_args.push(ExpressionType::ContainerReference(argument.clone()));
                     }
                     ExpressionType::RegisterReference(_) => {
-                        act_args.push(ExpressionType::RegisterReference(argument.clone()))
+                        act_args.push(ExpressionType::RegisterReference(argument.clone()));
                     }
 
-                    ExpressionType::VariableReference(_, _) => {
-                        act_args.push(ExpressionType::VariableReference(inst.name.clone(), argument.clone()))
+                    ExpressionType::VariableReference(_) => {
+                        act_args.push(ExpressionType::VariableReference(argument.clone()));
+                    }
+                    ExpressionType::NestedOpCode(_) => {
+                        println!("found nested arg {:?}", argument.clone());
+                    }
+                    ExpressionType::InstructionReference(_, _) => {
+                        let z = insts.iter().find(|x| x.name == argument.clone());
+                        if z.is_some() {
+                            act_args.push(ExpressionType::InstructionReference(argument.clone(), z.unwrap().arguments.clone()));
+                        } else {
+                            return Err(IllError::NonExistentInstruction(error_rh, argument.clone()));
+                        }
                     }
                 }
             }
-
+            let has_result = act_args.iter().find(|x| x.name() == "res".to_string()).is_some();
+            let result = if has_result {
+                Some(0 as usize)
+            } else {
+                None
+            };
 
             Ok(OpCode {
                 name: code_name,
                 arguments: act_args,
-                location: Some(error_rh) // error readhead is also where the beinning of the opcode.
+                location: Some(error_rh),
+                result,
             })
         }
 
@@ -525,16 +568,16 @@ pub mod ill {
                                 vec![INST_CODES_BEGIN],
                                 vec![INST_CODES_END],
                             )
-                            {
-                                return Err(UnexpectedCharacter(
-                                    head,
-                                    *it.peek().unwrap(), // TODO: Change back into x if we need to.
-                                    Some(format!(
-                                        " expecting instruction code beginning \"{}\".",
-                                        INST_CODES_BEGIN
-                                    )),
-                                ));
-                            }
+                                {
+                                    return Err(UnexpectedCharacter(
+                                        head,
+                                        *it.peek().unwrap(), // TODO: Change back into x if we need to.
+                                        Some(format!(
+                                            " expecting instruction code beginning \"{}\".",
+                                            INST_CODES_BEGIN
+                                        )),
+                                    ));
+                                }
                             dump_until(&mut head, it.by_ref(), vec![INST_CODES_BEGIN]);
                             while it.peek().is_some() && *it.peek().unwrap() != INST_CODES_END {
                                 if it.clone().collect::<String>().contains(COMMENT_SINGLE_LINE) {
@@ -564,7 +607,7 @@ pub mod ill {
                                 );
                                 let code = String::from(raw_code.trim());
 
-                                let res = self.parse_code(head.clone(), &cur_inst, code.clone());
+                                let res = self.parse_code(head.clone(), &cur_inst, &self.instructions, code.clone());
                                 if res.is_err() {
                                     return Err(res.err().unwrap());
                                 }
@@ -603,7 +646,6 @@ pub mod ill {
         }
 
         fn create_registers(&mut self) -> Result<(), IllError> {
-
             for e_file in &self.files {
                 let mut iter = e_file.content.chars().peekable();
                 let mut head: ReadHead = ReadHead::new();
@@ -651,7 +693,7 @@ pub mod ill {
 
             let res = self.scan_instructions();
             if res.is_err() {
-                return res.err()
+                return res.err();
             }
 
             if self.debug {

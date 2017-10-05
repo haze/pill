@@ -1,0 +1,14 @@
++a;
+
+
+$add(a_res, b) {
+    mvv b a_res;
+}
+
+$$() {
+    mak a_res 0;
+    mak b 1;
+    do add;
+    del b;
+    dis a_res;
+}
