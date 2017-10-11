@@ -1,5 +1,5 @@
 pub mod ill {
-    use interpreter::ill::{ReadHead, Register, Interpreter, Instruction, IllError};
+    use interpreter::ill::{ReadHead, Register, Instruction, IllError};
     use opcodes::ill::ExpressionType::*;
     use std::default::Default;
 
@@ -77,6 +77,8 @@ pub mod ill {
         opcodes.push(OpCode::new("do").expecting(inst_ref()));
         opcodes.push(OpCode::new("ret").expecting(opcode_result()));
         opcodes.push(OpCode::new("del").expecting(variable()));
+        opcodes.push(OpCode::new("pt").expecting(s_literal()));
+        opcodes.push(OpCode::new("ptl").expecting(s_literal()));
         opcodes.push(OpCode::new("if").expecting(opcode_result()).expecting(inst_ref()).expecting(inst_ref()));
         opcodes
     }
@@ -91,7 +93,6 @@ pub mod ill {
 
 
     impl OpCode {
-
         pub fn new_str(name: String) -> OpCode {
             OpCode {
                 name,
@@ -149,7 +150,8 @@ pub mod ill {
                             let cont = if !self.g_register_exists(value.clone(), registers) {
                                 if !self.l_register_exists(value.clone(), scope) {
                                     return Err(IllError::NonExistentRegister(rh_err, identifier.clone())); // Error is implemented but will never be thrown because the it wont compile if the register doesnt exist
-                                } else {    scope.iter_mut().find(|x| x.identifier == *value).unwrap().value
+                                } else {
+                                    scope.iter_mut().find(|x| x.identifier == *value).unwrap().value
                                 }
                             } else {
                                 registers.iter_mut().find(|x| x.identifier == *value).unwrap().value
@@ -162,7 +164,6 @@ pub mod ill {
                 "mov" => {
                     if let ExpressionType::IntegerLiteral(ref value) = self.arguments[0] {
                         if let ExpressionType::ContainerReference(ref identifier) = self.arguments[1] {
-                            println!("int lit = {:?}", value);
                             if !self.g_register_exists(identifier.clone(), registers) {
                                 if !self.l_register_exists(identifier.clone(), scope) {
                                     return Err(IllError::NonExistentRegister(rh_err, identifier.clone())); // Error is implemented but will never be thrown because the it wont compile if the register doesnt exist
@@ -209,11 +210,21 @@ pub mod ill {
                         }
                     }
                 }
+                "pt" => {
+                    if let ExpressionType::StringLiteral(ref s) = self.arguments[0] {
+                        print!("{}", s);
+                    }
+                }
+                "ptl" => {
+                    if let ExpressionType::StringLiteral(ref s) = self.arguments[0] {
+                        println!("{}", s);
+                    }
+                }
                 "do" => {
                     if let ExpressionType::InstructionReference(ref inst, ref captures) = self.arguments[0] {
                         let copy = o_insts.clone();
                         // let c_scope = scope.iter().filter(|x| captures.contains(&x.identifier)).collect();
-                        o_insts.iter_mut().find(|x| x.name == *inst).unwrap().c_execute(debug, registers, copy, scope);
+                        o_insts.iter_mut().find(|x| x.name == *inst).unwrap().c_execute(debug, registers, copy, scope).unwrap();
                     }
                 }
                 _ => ()

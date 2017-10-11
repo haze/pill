@@ -9,7 +9,9 @@ pub mod ill {
 
     use opcodes::ill::OpCode;
     use opcodes::ill::{ExpressionType};
-    use opcodes::ill::{s_literal, r_container, r_literal, r_register, r_variable};
+    use opcodes::ill::{s_literal};
+
+    use pcre::Pcre;
 
     use NamedFile;
     use IllError::*;
@@ -402,21 +404,26 @@ pub mod ill {
         }
 
         fn parse_code(&self, rh: ReadHead, inst: &Instruction, insts: &Vec<Instruction>, code: String) -> Result<OpCode, IllError> {
-            let data: Vec<String> = code.split(' ').map(String::from).collect::<Vec<String>>();
-            let code_name = data[0].clone();
+            fn sanitize(str: String) -> String {
+                str.replace("\"", "")
+            }
+
+            let mut pat = Pcre::compile(r#"('.*?'|".*?"|\S+)"#).unwrap();
+            let data = pat.matches(&*code).map(|m| m.group(0)).collect::<Vec<_>>();
+            let code_name = data[0].to_string();
             let nls = newlines(&code) as usize;
             let error_rh = rh.new_by(-(nls as i32), ((-rh.column) + code.len() as i32));
             if !self.does_opcode_exist(code_name.clone()) {
                 return Err(IllError::UnknownOpCode(
                     error_rh,
-                    data[0].clone(),
+                    sanitize(data[0].to_string()),
                 ));
             }
             let opcode = self.find_opcode(code_name.clone()).unwrap().clone();
             if (data.len() - 1) != opcode.arguments.len() {
                 return Err(IllError::OpCodeArgumentMismatch(
                     error_rh,
-                    data[0].clone(),
+                    sanitize(data[0].to_string()),
                     opcode.arguments.len() as i32,
                     (data.len() - 1) as i32,
                 ));
@@ -438,12 +445,11 @@ pub mod ill {
                 str.replace("\"", "")
             }
 
-            let name = opcode.name.clone();
             let mut exp_args = opcode.arguments.clone();
             let mut act_args: Vec<ExpressionType> = Vec::new();
             for i in 0..exp_args.len() {
                 let expected = exp_args[i].clone().into();
-                let ref argument = data[i + 1];
+                let ref argument = sanitize(data[i + 1].to_string());
                 if self.debug {
                     println!("arg = {}, expected = {:?}", argument, expected);
                 }

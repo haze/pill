@@ -11,6 +11,7 @@ use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use std::fs::File;
 use std::io::Write;
 
+extern crate pcre;
 
 mod interpreter;
 use interpreter::ill::{Interpreter, IllError};
