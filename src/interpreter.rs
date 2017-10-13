@@ -247,6 +247,24 @@ pub mod ill {
     }
 
     impl Instruction {
+        fn new_default() -> Instruction {
+            let mut scope: Vec<Register> = Vec::new();
+            scope.push(Register {
+                identifier: "res".to_string(),
+                value: 0,
+                is_variable: true,
+            });
+            Instruction { scope, ..Instruction::default() }
+        }
+        fn new(name: String, codes: Vec<OpCode>, mut scope: Vec<Register>, arguments: Vec<String>, is_main: bool) -> Instruction {
+            scope.push(Register {
+                identifier: "res".to_string(),
+                value: 0,
+                is_variable: true,
+            });
+            Instruction { name, codes, scope, arguments, is_main }
+        }
+
         fn find_scoped_register(&self, name: String) -> Option<&Register> {
             self.scope.iter().find(|&x| x.identifier == name)
         }
@@ -255,19 +273,21 @@ pub mod ill {
         }
 
 
-        pub fn c_execute(&mut self, debug: bool, registers: &mut Vec<Register>, o_insts: Vec<Instruction>, c_scope: &mut Vec<Register>) -> Result<(), IllError> {
+        pub fn c_execute(&mut self, debug: bool, registers: &mut Vec<Register>, o_insts: Vec<Instruction>, c_scope: &mut Vec<Register>) -> Result<usize, IllError> {
             for opcode in &self.codes {
                 let res = opcode.execute(debug, registers, o_insts.clone(), c_scope);
                 if res.is_err() {
-                    return res;
+                    return Err(res.err().unwrap());
                 }
             }
-            Ok(())
+            let res_var = c_scope.iter().find(|x| x.identifier.to_lowercase() == String::from("res")).unwrap();
+            Ok(res_var.value)
         }
 
         pub fn execute(&mut self, debug: bool, registers: &mut Vec<Register>, o_insts: Vec<Instruction>) -> Result<(), IllError> {
             for opcode in &self.codes {
                 let res = opcode.execute(debug, registers, o_insts.clone(), &mut self.scope);
+
                 if res.is_err() {
                     return res;
                 }
@@ -280,6 +300,7 @@ pub mod ill {
     pub struct Interpreter {
         pub debug: bool,
         files: Vec<EnhancedFile>,
+        preamble: Vec<EnhancedFile>,
         opcodes: Vec<OpCode>,
         // valid opcodes
         pub registers: Vec<Register>,
@@ -311,8 +332,8 @@ pub mod ill {
         x.chars().filter(|x| *x == NEWLINE).count() as i32
     }
 
-
     // because fuck iterators
+    // im sorry i love u iterator <3
     fn read_all_until_any(it: &mut Peekable<Chars>, ch: Vec<char>) -> (i32, i32, String) {
         let z = it.take_while(|c| ch.contains(c)).collect::<String>();
         let nl = newlines(&z);
@@ -354,13 +375,33 @@ pub mod ill {
             self.find_opcode(name).is_some()
         }
 
-        pub fn new(debug: bool, sources: Vec<NamedFile>, opcodes: Vec<OpCode>) -> Interpreter {
+        pub fn new(debug: bool, sources: Vec<NamedFile>, preamble: Vec<NamedFile>, opcodes: Vec<OpCode>) -> Interpreter {
             if debug {
                 println!("Making Interpreter with opcodes {:?}", opcodes);
             }
             Interpreter {
                 opcodes,
                 debug,
+                preamble: preamble
+                    .iter()
+                    .map(|nf| {
+                        let mut content = String::new();
+                        let mut clone = nf.file.try_clone().expect(&*format!(
+                            "[ERROR!]: could not create a copy of: {:?}",
+                            nf.name
+                        ));
+                        let sz = clone.read_to_string(&mut content).unwrap_or(0);
+                        if debug {
+                            println!("[:] read {} bytes for {:?}", sz, nf.file);
+                            println!("[:] content = `{:?}`", content);
+                        }
+                        EnhancedFile {
+                            filename: nf.name.clone(),
+                            file: clone,
+                            content,
+                        }
+                    })
+                    .collect(),
                 files: sources
                     .iter()
                     .map(|nf| {
@@ -449,7 +490,7 @@ pub mod ill {
             let mut act_args: Vec<ExpressionType> = Vec::new();
             for i in 0..exp_args.len() {
                 let expected = exp_args[i].clone().into();
-                let ref argument = sanitize(data[i + 1].to_string());
+                let ref argument = data[i + 1].to_string();
                 if self.debug {
                     println!("arg = {}, expected = {:?}", argument, expected);
                 }
@@ -501,9 +542,6 @@ pub mod ill {
                     ExpressionType::VariableReference(_) => {
                         act_args.push(ExpressionType::VariableReference(argument.clone()));
                     }
-                    ExpressionType::NestedOpCode(_) => {
-                        println!("found nested arg {:?}", argument.clone());
-                    }
                     ExpressionType::InstructionReference(_, _) => {
                         let z = insts.iter().find(|x| x.name == argument.clone());
                         if z.is_some() {
@@ -525,19 +563,18 @@ pub mod ill {
                 name: code_name,
                 arguments: act_args,
                 location: Some(error_rh),
-                result,
             })
         }
 
-        fn scan_instructions(&mut self) -> Result<(), IllError> {
+        fn scan_instructions(&mut self, preamble: bool) -> Result<(), IllError> {
             fn read_inst_def(it: &mut Peekable<Chars>) -> (i32, i32, String) {
                 read_until(it, vec![INST_PARAM_BEGIN])
             }
 
-            for e_file in &self.files {
+            for e_file in if preamble { &self.preamble } else { &self.files } {
                 let mut it = e_file.content.chars().peekable();
                 let mut head: ReadHead = ReadHead::new();
-                let mut cur_inst: Instruction = Default::default();
+                let mut cur_inst: Instruction = Instruction::new_default();
                 let mut cur_inst_sb: InstSwitchBox = Default::default();
                 while let Some(x) = it.next() {
                     head.advance(x);
@@ -630,7 +667,7 @@ pub mod ill {
                                 ));
                             }
                             self.instructions.push(cur_inst);
-                            cur_inst = Default::default();
+                            cur_inst = Instruction::new_default();
                             cur_inst_sb = Default::default();
                         }
                     }
@@ -644,11 +681,15 @@ pub mod ill {
             if self.debug {
                 println!("insts = {:?}", self.instructions);
             }
-            // inst.execute(debug, &self.registers, &self.instructions);
-            let inst_clone = self.instructions.clone();
-            let mut_inst: &mut Vec<Instruction> = self.instructions.as_mut();
-            let inst = mut_inst.iter_mut().find(|x| x.is_main).unwrap();
-            inst.execute(self.debug, &mut self.registers, inst_clone)
+            if !preamble {
+                // inst.execute(debug, &self.registers, &self.instructions);
+                let inst_clone = self.instructions.clone();
+                let mut_inst: &mut Vec<Instruction> = self.instructions.as_mut();
+                let inst = mut_inst.iter_mut().find(|x| x.is_main).unwrap();
+                inst.execute(self.debug, &mut self.registers, inst_clone)
+            } else {
+                Ok(())
+            }
         }
 
         fn create_registers(&mut self) -> Result<(), IllError> {
@@ -690,6 +731,8 @@ pub mod ill {
         }
 
         pub fn begin_parsing(&mut self) -> Option<IllError> {
+            self.scan_instructions(true);
+
             let res = self.create_registers();
             if res.is_err() {
                 return res.err();
@@ -697,7 +740,7 @@ pub mod ill {
 
             let debug = self.debug;
 
-            let res = self.scan_instructions();
+            let res = self.scan_instructions(false);
             if res.is_err() {
                 return res.err();
             }

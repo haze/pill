@@ -2,6 +2,7 @@ pub mod ill {
     use interpreter::ill::{ReadHead, Register, Instruction, IllError};
     use opcodes::ill::ExpressionType::*;
     use std::default::Default;
+    use std::ascii::AsciiExt;
 
     #[derive(Debug, Clone)]
     pub enum ExpressionType {
@@ -12,7 +13,6 @@ pub mod ill {
         RegisterReference(String),
         // Stack Name
         VariableReference(String),
-        NestedOpCode(usize),
         InstructionReference(String, Vec<String>),
     }
 
@@ -25,7 +25,6 @@ pub mod ill {
                 RegisterReference(_) => "Register Reference",
                 VariableReference(_) => "Variable Reference",
                 StringLiteral(_) => "String Literal",
-                NestedOpCode(_) => "Nested OpCode",
                 InstructionReference(_, _) => "Instruction Reference",
             })
         }
@@ -51,8 +50,6 @@ pub mod ill {
         ExpressionType::StringLiteral(String::new())
     }
 
-    pub fn opcode_result() -> ExpressionType { ExpressionType::NestedOpCode(0 as usize) }
-
     pub fn inst_ref() -> ExpressionType { ExpressionType::InstructionReference(String::new(), Vec::new()) }
 
     pub fn r_literal(it: usize) -> ExpressionType { ExpressionType::IntegerLiteral(it) }
@@ -65,21 +62,19 @@ pub mod ill {
 
     pub fn r_string(it: String) -> ExpressionType { ExpressionType::StringLiteral(it) }
 
-    pub fn r_opcode_res(it: String) -> ExpressionType { ExpressionType::NestedOpCode(0) }
-
     // i've always wanted a modular language...
     pub fn default_opcodes() -> Vec<OpCode> {
         let mut opcodes: Vec<OpCode> = Vec::new();
         opcodes.push(OpCode::new("mov").expecting(literal()).expecting(container()));
         opcodes.push(OpCode::new("mvv").expecting(container()).expecting(variable()));
+        opcodes.push(OpCode::new("add").expecting(literal()).expecting(variable()));
         opcodes.push(OpCode::new("mak").expecting(s_literal()).expecting(literal()));
         opcodes.push(OpCode::new("dis").expecting(container()));
         opcodes.push(OpCode::new("do").expecting(inst_ref()));
-        opcodes.push(OpCode::new("ret").expecting(opcode_result()));
         opcodes.push(OpCode::new("del").expecting(variable()));
         opcodes.push(OpCode::new("pt").expecting(s_literal()));
         opcodes.push(OpCode::new("ptl").expecting(s_literal()));
-        opcodes.push(OpCode::new("if").expecting(opcode_result()).expecting(inst_ref()).expecting(inst_ref()));
+        opcodes.push(OpCode::new("if").expecting(inst_ref()).expecting(inst_ref()).expecting(inst_ref()));
         opcodes
     }
 
@@ -88,7 +83,6 @@ pub mod ill {
         pub name: String,
         pub arguments: Vec<ExpressionType>,
         pub location: Option<ReadHead>,
-        pub result: Option<usize>
     }
 
 
@@ -115,6 +109,9 @@ pub mod ill {
             }
         }
 
+        fn instruction_exists(&self, name: &String, insts: Vec<Instruction>) -> bool {
+            insts.iter().find(|x| x.name == *name).is_some()
+        }
         fn register_exists(&self, name: String, global: bool, registers: Option<&Vec<Register>>, scope: Option<&mut Vec<Register>>) -> bool {
             if global {
                 return registers.unwrap().iter().find(|x| x.identifier == *name).is_some();
@@ -128,6 +125,10 @@ pub mod ill {
 
         pub fn execute(&self, debug: bool, registers: &mut Vec<Register>, mut o_insts: Vec<Instruction>, scope: &mut Vec<Register>) -> Result<(), IllError> {
             let rh_err: ReadHead = self.location.unwrap().clone();
+            fn get_and_execute(name: &String, debug: bool, registers: &mut Vec<Register>, mut insts: Vec<Instruction>, scope: &mut Vec<Register>) -> Result<usize, IllError> {
+                let clone = insts.clone();
+                insts.iter_mut().find(|x| x.name == *name).unwrap().c_execute(debug, registers, clone, scope)
+            }
             match &*self.name.to_lowercase() {
                 "mak" => {
                     if let ExpressionType::StringLiteral(ref identifier) = self.arguments[0] {
@@ -137,6 +138,9 @@ pub mod ill {
                             return Err(IllError::RegisterRedefinition(rh_err, identifier.clone(), Some(variable().name())));
                         }
                         if let ExpressionType::IntegerLiteral(value) = self.arguments[1] {
+                            if identifier.eq_ignore_ascii_case("res") {
+                                return Err(IllError::RegisterRedefinition(rh_err, identifier.clone(), Some(format!("default register {:?}", identifier))));
+                            }
                             scope.push(Register { identifier: identifier.clone(), value, is_variable: true });
                             if debug {
                                 println!("Added variable {} => {}", identifier, value);
@@ -149,7 +153,7 @@ pub mod ill {
                         if let ExpressionType::VariableReference(ref identifier) = self.arguments[1] {
                             let cont = if !self.g_register_exists(value.clone(), registers) {
                                 if !self.l_register_exists(value.clone(), scope) {
-                                    return Err(IllError::NonExistentRegister(rh_err, identifier.clone())); // Error is implemented but will never be thrown because the it wont compile if the register doesnt exist
+                                    return Err(IllError::NonExistentRegister(rh_err, value.clone()));
                                 } else {
                                     scope.iter_mut().find(|x| x.identifier == *value).unwrap().value
                                 }
@@ -157,7 +161,20 @@ pub mod ill {
                                 registers.iter_mut().find(|x| x.identifier == *value).unwrap().value
                             };
                             let reg = scope.iter_mut().find(|x| x.identifier == *identifier).unwrap();
+                            println!("Added {} onto {}", cont, reg.identifier);
                             reg.value += cont;
+                        }
+                    }
+                }
+                "add" => {
+                    if let ExpressionType::IntegerLiteral(ref value) = self.arguments[0] {
+                        if let ExpressionType::VariableReference(ref variable) = self.arguments[1] {
+                            if !self.l_register_exists(variable.clone(), scope) {
+                                return Err(IllError::NonExistentRegister(rh_err, variable.clone()));
+                            } else {
+                                let reg = scope.iter_mut().find(|x| x.identifier == *variable).unwrap();
+                                reg.value += *value as usize;
+                            }
                         }
                     }
                 }
@@ -220,11 +237,41 @@ pub mod ill {
                         println!("{}", s);
                     }
                 }
+                "if" => {
+                    if let ExpressionType::InstructionReference(ref inst, ref captures) = self.arguments[0] {
+                        if let ExpressionType::InstructionReference(ref a_inst, ref a_captures) = self.arguments[1] {
+                            if let ExpressionType::InstructionReference(ref b_inst, ref b_captures) = self.arguments[2] {
+                                let nested_clone = o_insts.clone();
+                                if !self.instruction_exists(inst, nested_clone) {
+                                    return Err(IllError::NonExistentInstruction(rh_err, inst.clone()));
+                                }
+                                let result = get_and_execute(inst, debug, registers, o_insts.clone(), scope);
+                                if result.is_err() {
+                                    return Err(result.err().unwrap());
+                                } else {
+                                    if !self.instruction_exists(a_inst, o_insts.clone()) {
+                                        return Err(IllError::NonExistentInstruction(rh_err, a_inst.clone()));
+                                    } else if !self.instruction_exists(b_inst, o_insts.clone()) {
+                                        return Err(IllError::NonExistentInstruction(rh_err, b_inst.clone()));
+                                    }
+                                    if result.unwrap() == 0 {
+                                        o_insts.clone().iter_mut().find(|x| x.name == *b_inst).unwrap().c_execute(debug, registers, o_insts.clone(), scope);
+                                    } else {
+                                        o_insts.clone().iter_mut().find(|x| x.name == *a_inst).unwrap().c_execute(debug, registers, o_insts.clone(), scope);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 "do" => {
                     if let ExpressionType::InstructionReference(ref inst, ref captures) = self.arguments[0] {
-                        let copy = o_insts.clone();
-                        // let c_scope = scope.iter().filter(|x| captures.contains(&x.identifier)).collect();
-                        o_insts.iter_mut().find(|x| x.name == *inst).unwrap().c_execute(debug, registers, copy, scope).unwrap();
+                        if self.instruction_exists(inst, o_insts.clone()) {
+                            let copy = o_insts.clone();
+                            o_insts.iter_mut().find(|x| x.name == *inst).unwrap().c_execute(debug, registers, copy, scope).unwrap();
+                        } else {
+                            return Err(IllError::NonExistentInstruction(rh_err, inst.clone()));
+                        }
                     }
                 }
                 _ => ()
