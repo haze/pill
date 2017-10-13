@@ -1,0 +1,5 @@
++a;
+
+$$() {
+    ptl "Hello, World!";
+}

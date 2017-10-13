@@ -1,0 +1,13 @@
++a;
+
+$AA() {
+    ptl "Hello, World!";
+}
+
+$BB() {
+    ptl "Woah now!";
+}
+
+$$() {
+    if true AA BB;
+}

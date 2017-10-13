@@ -1,0 +1,8 @@
+
+$true() {
+    mov 1 res;
+}
+
+$false() {
+    mov 0 res;
+}

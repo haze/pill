@@ -1,0 +1,22 @@
++a;
+
+
+$true() {
+    add 1 res;
+}
+
+$false() {
+    add 0 res;
+}
+
+$b() {
+    ptl b;
+}
+
+$a() {
+    ptl "a";
+}
+
+$$() {
+    if true a b;
+}
