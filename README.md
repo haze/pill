@@ -1,8 +1,11 @@
 <img src="https://cdn.rawgit.com/hvze/pill/7563861d/images/pill_logo.svg" width=55/> 
 
+
 # pill
 
 The (Pretty) Ill Programming Language's Rust Interpreter
+
+<img src="https://cdn.rawgit.com/hvze/pill/2310b6b1/images/fizzbuzz.png" />
 
 ## Getting Started
 
