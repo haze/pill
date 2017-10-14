@@ -246,7 +246,6 @@ pub mod ill {
                                 if !self.l_register_exists(identifier.clone(), scope) {
                                     return Err(IllError::NonExistentRegister(rh_err, identifier.clone())); // Error is implemented but will never be thrown because the it wont compile if the register doesnt exist
                                 } else {
-
                                     let reg = scope.iter_mut().find(|x| x.identifier == *identifier).unwrap();
                                     reg.value = val;
                                 }

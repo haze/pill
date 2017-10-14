@@ -29,7 +29,7 @@ pub struct NamedFile {
 
 fn main() {
     let arg_matches = App::new("ill interpreter")
-        .version("0.1B")
+        .version("0.8F")
         .author("haze booth <admin@haze.pw>")
         .about("the (pretty) ill tiny language interpreter")
         .arg(
@@ -39,7 +39,8 @@ fn main() {
                 .multiple(true),
         )
         .arg(Arg::with_name("preamble").long("preamble").takes_value(true).short("pre").multiple(true).help("load these files before we execute the main ones."))
-        .arg(Arg::with_name("debug").help("show debug text").short("d"))
+        .arg(Arg::with_name("debug").help("show debug text").short("d").long("debug"))
+        .arg(Arg::with_name("quiet").help("only show program output").short("q").long("quiet"))
         .get_matches();
 
     let input_files_str: Vec<_> = arg_matches.values_of("inputs").unwrap().collect();
@@ -70,7 +71,7 @@ fn main() {
         })
         .collect();
 
-    let mut int: Interpreter = Interpreter::new(arg_matches.is_present("debug"), input_files, preamble_files, opcodes::ill::default_opcodes());
+    let mut int: Interpreter = Interpreter::new(arg_matches.is_present("debug"), arg_matches.is_present("quiet"), input_files, preamble_files, opcodes::ill::default_opcodes());
     let mut res: Option<IllError> = None;
     let dur = Duration::span(|| { res = int.begin_parsing(); });
 
@@ -86,9 +87,11 @@ fn main() {
         print!(": {}\n", err);
     }
 
-    println!(
-        "PILL Execution took: {}s, ({} ms)",
-        dur.num_seconds(),
-        dur.num_milliseconds()
-    );
+    if !int.quiet {
+        println!(
+            "PILL Execution took: {}s, ({} ms)",
+            dur.num_seconds(),
+            dur.num_milliseconds()
+        );
+    }
 }

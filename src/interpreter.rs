@@ -6,14 +6,15 @@ pub mod ill {
     use std::error::Error;
     use std::fmt;
     use std::fmt::{Display, Formatter};
+    use std::ops::Sub;
 
     use opcodes::ill::OpCode;
-    use opcodes::ill::{ExpressionType};
-    use opcodes::ill::{s_literal};
+    use opcodes::ill::ExpressionType;
+    use opcodes::ill::s_literal;
 
     use pcre::Pcre;
     use either::Either;
-
+    use time::Duration;
 
     use NamedFile;
     use IllError::*;
@@ -300,6 +301,7 @@ pub mod ill {
     #[derive(Default)]
     pub struct Interpreter {
         pub debug: bool,
+        pub quiet: bool,
         files: Vec<EnhancedFile>,
         preamble: Vec<EnhancedFile>,
         opcodes: Vec<OpCode>,
@@ -376,13 +378,14 @@ pub mod ill {
             self.find_opcode(name).is_some()
         }
 
-        pub fn new(debug: bool, sources: Vec<NamedFile>, preamble: Vec<NamedFile>, opcodes: Vec<OpCode>) -> Interpreter {
+        pub fn new(debug: bool, quiet: bool, sources: Vec<NamedFile>, preamble: Vec<NamedFile>, opcodes: Vec<OpCode>) -> Interpreter {
             if debug {
                 println!("Making Interpreter with opcodes {:?}", opcodes);
             }
             Interpreter {
                 opcodes,
                 debug,
+                quiet,
                 preamble: preamble
                     .iter()
                     .map(|nf| {
@@ -558,7 +561,7 @@ pub mod ill {
             })
         }
 
-        fn scan_instructions(&mut self, preamble: bool) -> Result<(), IllError> {
+        fn scan_instructions(&mut self, preamble: bool) -> (Result<(), IllError>, Option<Duration>) {
             fn read_inst_def(it: &mut Peekable<Chars>) -> (i32, i32, String) {
                 read_until(it, vec![INST_PARAM_BEGIN])
             }
@@ -574,11 +577,11 @@ pub mod ill {
                         dump_until(&mut head, it.by_ref(), vec![NEWLINE]);
                     } else if x == INST_DEF {
                         if cur_inst_sb.is_reading_definition {
-                            return Err(UnexpectedCharacter(
+                            return (Err(UnexpectedCharacter(
                                 head,
                                 x,
                                 Some(String::from(" expecting instruction identifier.")),
-                            ));
+                            )), None);
                         } else {
                             cur_inst_sb.is_reading_definition = true;
                         }
@@ -604,18 +607,17 @@ pub mod ill {
                                 vec![INST_CODES_END],
                             )
                                 {
-                                    return Err(UnexpectedCharacter(
+                                    return (Err(UnexpectedCharacter(
                                         head,
                                         *it.peek().unwrap(), // TODO: Change back into x if we need to.
                                         Some(format!(
                                             " expecting instruction code beginning \"{}\".",
                                             INST_CODES_BEGIN
                                         )),
-                                    ));
+                                    )), None);
                                 }
                             dump_until(&mut head, it.by_ref(), vec![INST_CODES_BEGIN]);
                             while it.peek().is_some() && *it.peek().unwrap() != INST_CODES_END {
-
                                 if !any_exists_until(
                                     &mut it.clone(),
                                     vec![DEF_END],
@@ -634,7 +636,7 @@ pub mod ill {
                                 let code = String::from(raw_code.trim());
                                 let res = self.parse_code(head.clone(), &cur_inst, &self.instructions, code.clone());
                                 if res.is_err() {
-                                    return Err(res.err().unwrap());
+                                    return (Err(res.err().unwrap()), None);
                                 }
                                 cur_inst.codes.push(res.ok().unwrap());
                                 if self.debug {
@@ -643,10 +645,10 @@ pub mod ill {
                             }
                             cur_inst_sb.is_reading_codes = false;
                             if self.does_instruction_exist(cur_inst.name.clone()) {
-                                return Err(IllError::InstructionRedefinition(
+                                return (Err(IllError::InstructionRedefinition(
                                     head.new_by(0, -(cur_inst.name.len() as i32)),
                                     cur_inst.name,
-                                ));
+                                )), None);
                             }
                             self.instructions.push(cur_inst);
                             cur_inst = Instruction::new_default();
@@ -656,7 +658,7 @@ pub mod ill {
                 }
             }
             if self.instructions.len() == 0 {
-                return Err(NoMainInstruction());
+                return (Err(NoMainInstruction()), None);
             } else if self.instructions.len() == 1 {
                 self.instructions[0].is_main = true;
             }
@@ -665,12 +667,24 @@ pub mod ill {
             }
             if !preamble {
                 // inst.execute(debug, &self.registers, &self.instructions);
-                let inst_clone = self.instructions.clone();
-                let mut_inst: &mut Vec<Instruction> = self.instructions.as_mut();
-                let inst = mut_inst.iter_mut().find(|x| x.is_main).unwrap();
-                inst.execute(self.debug, &mut self.registers, inst_clone)
+
+                let mut res = Ok(());
+                let dur = Duration::span(|| {
+                    let inst_clone = self.instructions.clone();
+                    let debug = self.debug;
+                    let mut_inst: &mut Vec<Instruction> = self.instructions.as_mut();
+                    let inst = mut_inst.iter_mut().find(|x| x.is_main).unwrap();
+                    res = inst.execute(debug, &mut self.registers, inst_clone)
+                });
+                if !self.quiet {
+                    println!("Pill Main Instruction Execution took {}s ({}ms).", dur.num_seconds(), dur.num_milliseconds());
+                }
+                if res.is_err() {
+                    return (Err(res.err().unwrap()), None);
+                }
+                (res, Some(dur))
             } else {
-                Ok(())
+                (Ok(()), None)
             }
         }
 
@@ -713,18 +727,25 @@ pub mod ill {
         }
 
         pub fn begin_parsing(&mut self) -> Option<IllError> {
-            self.scan_instructions(true);
+            let inst_scan = Duration::span(|| {
+                self.scan_instructions(true);
+            });
 
             let res = self.create_registers();
             if res.is_err() {
                 return res.err();
             }
 
-            let debug = self.debug;
-
-            let res = self.scan_instructions(false);
-            if res.is_err() {
-                return res.err();
+            let mut res = (Ok(()), None);
+            let sscan_dur = Duration::span(|| res = self.scan_instructions(false));
+            let (a_res, time) = res; // destructure this tuple like im about to destructure misconceptions about race mixing
+            let r_t = sscan_dur.sub(time.unwrap());
+            if !self.quiet {
+                println!("Pill Preamble Instruction Scan took {}s, ({}ms).", inst_scan.num_seconds(), inst_scan.num_milliseconds());
+                println!("Pill Main Instruction Parsing took ({}s, ({}ms).", r_t.num_seconds(), r_t.num_milliseconds());
+            }
+            if a_res.is_err() {
+                return a_res.err();
             }
 
             if self.debug {
