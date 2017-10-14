@@ -53,6 +53,7 @@ The following rust crates:
 * clap, v2.25.0
 * time, v0.1.37
 * termcolor, v0.3.3
+* pcre, v0.2.3
 
 ## Contributing
 

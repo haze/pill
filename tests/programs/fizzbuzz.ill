@@ -1,0 +1,46 @@
++_;
+
+$is_div_3() {
+    mod x 3 z;
+    eq z 0 y;
+    mov y res;
+    del y;
+    del z;
+}
+
+$is_div_5() {
+    mod x 5 z;
+    eq z 0 y;
+    mov y res;
+    del y;
+    del z;
+}
+
+$is_div_15() {
+    mod x 15 z;
+    eq z 0 y;
+    mov y res;
+    del y;
+    del z;
+}
+
+$p_fb() { pt "["; dis x; pt "]:"; ptl " FizzBuzz"; }
+$p_f() { pt "["; dis x; pt "]:"; ptl " Fizz"; }
+$p_b() { pt "["; dis x; pt "]:"; ptl " Buzz"; }
+$p_n() { dsl x; }
+
+$other2() {
+    if is_div_3 p_f p_n;
+}
+
+$other() {
+    if is_div_5 p_b other2;
+}
+
+$test_fizzbuzz() {
+    if is_div_15 p_fb other;
+}
+
+$$() {
+    for x 1 101 1 test_fizzbuzz;
+}

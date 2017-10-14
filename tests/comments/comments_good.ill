@@ -1,8 +1,0 @@
-+a;
-> other comment
-$$ () {
-    > single line comment
-    mak b 1;
-    > second
-    mak c 2;
-}

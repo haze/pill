@@ -4,3 +4,4 @@ target/
 .lock
 .vscode/
 .idea/
+.lock

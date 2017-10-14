@@ -14,6 +14,7 @@ use std::fs::File;
 use std::io::Write;
 
 extern crate pcre;
+extern crate either;
 
 mod interpreter;
 

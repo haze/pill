@@ -1,0 +1,7 @@
++a;
+$true() { mov 0 res; }
+$false() { mov 1 res; }
+
+$nothing() {}
+$something() { ptl "i fuck dogs"; }
+$$() { if true something nothing; }

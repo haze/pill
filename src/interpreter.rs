@@ -12,6 +12,8 @@ pub mod ill {
     use opcodes::ill::{s_literal};
 
     use pcre::Pcre;
+    use either::Either;
+
 
     use NamedFile;
     use IllError::*;
@@ -37,7 +39,7 @@ pub mod ill {
     #[derive(Default, Debug, Clone)]
     pub struct Register {
         pub identifier: String,
-        pub value: usize,
+        pub value: f64,
         pub is_variable: bool,
     }
 
@@ -251,7 +253,7 @@ pub mod ill {
             let mut scope: Vec<Register> = Vec::new();
             scope.push(Register {
                 identifier: "res".to_string(),
-                value: 0,
+                value: 0 as f64,
                 is_variable: true,
             });
             Instruction { scope, ..Instruction::default() }
@@ -259,7 +261,7 @@ pub mod ill {
         fn new(name: String, codes: Vec<OpCode>, mut scope: Vec<Register>, arguments: Vec<String>, is_main: bool) -> Instruction {
             scope.push(Register {
                 identifier: "res".to_string(),
-                value: 0,
+                value: 0 as f64,
                 is_variable: true,
             });
             Instruction { name, codes, scope, arguments, is_main }
@@ -273,7 +275,7 @@ pub mod ill {
         }
 
 
-        pub fn c_execute(&mut self, debug: bool, registers: &mut Vec<Register>, o_insts: Vec<Instruction>, c_scope: &mut Vec<Register>) -> Result<usize, IllError> {
+        pub fn c_execute(&mut self, debug: bool, registers: &mut Vec<Register>, o_insts: Vec<Instruction>, c_scope: &mut Vec<Register>) -> Result<f64, IllError> {
             for opcode in &self.codes {
                 let res = opcode.execute(debug, registers, o_insts.clone(), c_scope);
                 if res.is_err() {
@@ -287,7 +289,6 @@ pub mod ill {
         pub fn execute(&mut self, debug: bool, registers: &mut Vec<Register>, o_insts: Vec<Instruction>) -> Result<(), IllError> {
             for opcode in &self.codes {
                 let res = opcode.execute(debug, registers, o_insts.clone(), &mut self.scope);
-
                 if res.is_err() {
                     return res;
                 }
@@ -448,16 +449,16 @@ pub mod ill {
             fn sanitize(str: String) -> String {
                 str.replace("\"", "")
             }
-
             let mut pat = Pcre::compile(r#"('.*?'|".*?"|\S+)"#).unwrap();
             let data = pat.matches(&*code).map(|m| m.group(0)).collect::<Vec<_>>();
             let code_name = data[0].to_string();
             let nls = newlines(&code) as usize;
             let error_rh = rh.new_by(-(nls as i32), ((-rh.column) + code.len() as i32));
+            //println!("Looking for: {:?}, code = {:?}, data[0] = {:?}, data = {:?}", code_name.clone(), code.clone(), data[0].to_string(), data);
             if !self.does_opcode_exist(code_name.clone()) {
                 return Err(IllError::UnknownOpCode(
                     error_rh,
-                    sanitize(data[0].to_string()),
+                    code_name.clone(),
                 ));
             }
             let opcode = self.find_opcode(code_name.clone()).unwrap().clone();
@@ -471,7 +472,7 @@ pub mod ill {
             }
 
             fn is_arg_literal(arg: String) -> bool {
-                arg.parse::<usize>().is_ok()
+                arg.parse::<f64>().is_ok()
             }
 
             fn is_arg_string(arg: String) -> bool {
@@ -494,25 +495,16 @@ pub mod ill {
                 if self.debug {
                     println!("arg = {}, expected = {:?}", argument, expected);
                 }
-
                 match expected {
-                    ExpressionType::IntegerLiteral(_) => {
-                        if inst.does_scoped_register_exist(argument.clone()) {
-                            let reg = inst.find_scoped_register(argument.clone());
-                            act_args.push(ExpressionType::IntegerLiteral(reg.unwrap().value as usize));
-                        } else if self.does_register_exist(argument.clone()) {
-                            let reg = self.find_register(argument.clone());
-                            act_args.push(ExpressionType::IntegerLiteral(reg.unwrap().value as usize));
-                        } /*else if !is_arg_literal(argument.clone()) {
-                                return Err(OpCodeInvalidArgument(
-                                    error_rh,
-                                    r_literal(0),
-                                    argument.clone()
-                                ));
-                        } */ else {
-                                // See if I can do this by Reference? (looks to be too complicated, I don't want to have to use refcells)
-                                act_args.push(ExpressionType::IntegerLiteral(argument.parse::<usize>().unwrap()));
+                    ExpressionType::ProbableLiteral(_) => {
+                        if is_arg_literal(argument.clone()) {
+                            act_args.push(ExpressionType::ProbableLiteral(Either::Left(argument.parse::<f64>().unwrap())));
+                        } else {
+                            act_args.push(ExpressionType::ProbableLiteral(Either::Right(argument.clone())));
                         }
+                    }
+                    ExpressionType::IntegerLiteral(_) => {
+                        act_args.push(ExpressionType::IntegerLiteral(argument.parse::<f64>().unwrap()));
                     }
 
                     ExpressionType::StringLiteral(_) => {
@@ -623,17 +615,7 @@ pub mod ill {
                                 }
                             dump_until(&mut head, it.by_ref(), vec![INST_CODES_BEGIN]);
                             while it.peek().is_some() && *it.peek().unwrap() != INST_CODES_END {
-                                if it.clone().collect::<String>().contains(COMMENT_SINGLE_LINE) {
-                                    let x = traverse_read(&mut head, read_all_until_any(it.by_ref(), vec![NEWLINE, TAB, COMMENT_SINGLE_LINE]));
-                                    if x.contains(COMMENT_SINGLE_LINE) {
-                                        dump_until(&mut head, it.by_ref(), vec![NEWLINE]);
-                                    }
-                                }
 
-                                let chars = it.clone().collect::<String>();
-                                if *it.peek().unwrap() == COMMENT_SINGLE_LINE {
-                                    dump_until(&mut head, it.by_ref(), vec![NEWLINE]);
-                                }
                                 if !any_exists_until(
                                     &mut it.clone(),
                                     vec![DEF_END],
@@ -648,8 +630,8 @@ pub mod ill {
                                     &mut head,
                                     read_until_spare_ws(it.by_ref(), vec![DEF_END]),
                                 );
-                                let code = String::from(raw_code.trim());
 
+                                let code = String::from(raw_code.trim());
                                 let res = self.parse_code(head.clone(), &cur_inst, &self.instructions, code.clone());
                                 if res.is_err() {
                                     return Err(res.err().unwrap());
