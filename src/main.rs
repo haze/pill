@@ -18,13 +18,21 @@ extern crate either;
 
 mod interpreter;
 
-use interpreter::ill::{Interpreter, IllError};
+use interpreter::ill::{Interpreter, AdvancedIllError};
 
 mod opcodes;
 
 pub struct NamedFile {
     file: File,
     name: String,
+}
+
+fn repeat(times: i32, char: char) -> String {
+    let mut buff: String = String::new();
+    for _ in 0..times {
+        buff.push(char);
+    }
+    buff
 }
 
 fn main() {
@@ -44,7 +52,6 @@ fn main() {
         .get_matches();
 
     let input_files_str: Vec<_> = arg_matches.values_of("inputs").unwrap().collect();
-
     let preamble_files;
     if arg_matches.is_present("preamble") {
         let preamble_files_str: Vec<_> = arg_matches.values_of("preamble").unwrap().collect();
@@ -70,21 +77,51 @@ fn main() {
             }
         })
         .collect();
-
     let mut int: Interpreter = Interpreter::new(arg_matches.is_present("debug"), arg_matches.is_present("quiet"), input_files, preamble_files, opcodes::ill::default_opcodes());
-    let mut res: Option<IllError> = None;
+    let mut res: Option<AdvancedIllError> = None;
     let dur = Duration::span(|| { res = int.begin_parsing(); });
-
     let mut out = StandardStream::stdout(ColorChoice::Always);
 
     if res.is_some() {
         let err = res.unwrap();
-        out.set_color(ColorSpec::new().set_fg(Some(Color::Red)))
+        out.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))
             .ok();
-        write!(&mut out, "{}", err.name()).ok();
+        let err_head_line = if err.head.is_some() { err.head.unwrap().line } else { -1 };
+        let error_str = err.get_error_portion();
+        if error_str.is_some() {
+            let xstr = error_str.unwrap();
+            let head = err.head.unwrap();
+            let space_push_buffer = repeat(head.line.to_string().len() as i32, ' ');
+            writeln!(&mut out, "    {}{}", space_push_buffer, err.error.name()).ok();
+            print!("{}--> ", space_push_buffer);
+            out.set_color(ColorSpec::new().set_fg(Some(Color::White)))
+                .ok();
+            println!("{}:{}:{}", err.file.filename, head.line, head.column);
+            out.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))
+                .ok();
+            for line in (err_head_line - 1)..(err_head_line + 2) {
+                out.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))
+                    .ok();
+                if line == err_head_line {
+                    print!("{} |", line);
+                    out.set_color(ColorSpec::new().set_fg(Some(Color::White)))
+                        .ok();
+                    println!(" {}", xstr);
+                } else if line == (err_head_line + 1) {
+                    let err_pointer_buffer = repeat(head.column - 1, ' ');
+                    print!("{} |{}", line, err_pointer_buffer);
+                    let err_tail = repeat((xstr.len() as i32 - head.column), '-');
+                    print!(" ^{}", err_tail);
+                    out.set_color(ColorSpec::new().set_fg(Some(Color::White)))
+                        .ok();
+                    println!(" {}", err.error.get_actual_desc());
+                } else {
+                    println!("{} |", line);
+                }
+            }
+        }
         out.set_color(ColorSpec::new().set_fg(Some(Color::White)))
             .ok();
-        print!(": {}\n", err);
     }
 
     if !int.quiet {

@@ -17,7 +17,7 @@ pub mod ill {
     use time::Duration;
 
     use NamedFile;
-    use IllError::*;
+    use self::IllError::*;
 
     const TAB: char = ' ';
     const NEWLINE: char = '\n';
@@ -47,8 +47,23 @@ pub mod ill {
     #[derive(Debug)]
     pub struct EnhancedFile {
         file: File,
-        filename: String,
+        pub filename: String,
         content: String,
+    }
+
+    impl EnhancedFile {
+        pub fn unsafe_clone(&self) -> EnhancedFile { self.try_clone().unwrap() }
+        fn try_clone(&self) -> Option<EnhancedFile> {
+            let f_copy = self.file.try_clone();
+            if f_copy.is_ok() {
+                return Some(EnhancedFile {
+                    file: f_copy.ok().unwrap(),
+                    filename: self.filename.clone(),
+                    content: self.content.clone()
+                });
+            }
+            None
+        }
     }
 
     impl Clone for EnhancedFile {
@@ -63,8 +78,31 @@ pub mod ill {
 
     #[derive(Default, Debug, Clone, Copy)]
     pub struct ReadHead {
-        column: i32,
-        line: i32,
+        pub column: i32,
+        pub line: i32,
+    }
+
+    pub struct AdvancedIllError {
+        pub error: IllError,
+        pub head: Option<ReadHead>,
+        pub file: EnhancedFile
+    }
+
+    impl AdvancedIllError {
+        pub fn get_error_portion(&self) -> Option<String> {
+            if self.head.is_none() { return None; }
+            let text = self.file.content.clone();
+            let line = text.lines().nth((self.head.unwrap().line - 1) as usize).unwrap();
+            return Some(line.to_string());
+        }
+
+        pub fn new(err: IllError, head: Option<ReadHead>, file: EnhancedFile) -> AdvancedIllError {
+            AdvancedIllError {
+                error: err,
+                head,
+                file
+            }
+        }
     }
 
     #[derive(Debug)]
@@ -109,6 +147,11 @@ pub mod ill {
     }
 
     impl IllError {
+        pub fn get_actual_desc(&self) -> String {
+            let x = format!("{}", self);
+            let mut spl = x.split("=> ");
+            String::from(spl.nth(1).unwrap())
+        }
         pub fn name(&self) -> String {
             String::from(match *self {
                 RegisterRedefinition(_, _, _) => "Register Redefinition",
@@ -205,9 +248,9 @@ pub mod ill {
                 OpCodeInvalidContainerReference(ref rh, ref e_type, ref got, ref msg) => {
                     write!(f, "Err@{} => Expected a {}, but got \"{}\" instead: {}.", fmt_rh(rh), e_type.name(), got, msg)
                 }
-                UnescapedStringLiteralIsContainer(ref rh, ref got) => write!(f, "Err@{} => Found an unescaped String literal that is also a container (register / variable). Try using \"{}\".", fmt_rh(rh), got),
-                NonExistentRegister(ref rh, ref name) => write!(f, "Err@{} => The container {} does not exist globally nor locally.", fmt_rh(rh), name),
-                NonExistentInstruction(ref rh, ref name) => write!(f, "Err@{} => The instruction {} does not exist.", fmt_rh(rh), name),
+                UnescapedStringLiteralIsContainer(ref rh, ref got) => write!(f, "Err@{} => Found an unescaped String literal that is also a container (register / variable). Try using {:?}.", fmt_rh(rh), got),
+                NonExistentRegister(ref rh, ref name) => write!(f, "Err@{} => The container {:?} does not exist globally nor locally.", fmt_rh(rh), name),
+                NonExistentInstruction(ref rh, ref name) => write!(f, "Err@{} => The instruction {:?} does not exist.", fmt_rh(rh), name),
                 ImmutableRegister(ref rh, ref name) => write!(f, "Err@{} => The register modified here {:?} is immutable.", fmt_rh(rh), name)
             }
         }
@@ -276,9 +319,9 @@ pub mod ill {
         }
 
 
-        pub fn c_execute(&mut self, debug: bool, registers: &mut Vec<Register>, o_insts: Vec<Instruction>, c_scope: &mut Vec<Register>) -> Result<f64, IllError> {
+        pub fn c_execute(&mut self, file: EnhancedFile, debug: bool, registers: &mut Vec<Register>, o_insts: Vec<Instruction>, c_scope: &mut Vec<Register>) -> Result<f64, AdvancedIllError> {
             for opcode in &self.codes {
-                let res = opcode.execute(debug, registers, o_insts.clone(), c_scope);
+                let res = opcode.execute(file.unsafe_clone(), debug, registers, o_insts.clone(), c_scope);
                 if res.is_err() {
                     return Err(res.err().unwrap());
                 }
@@ -287,9 +330,9 @@ pub mod ill {
             Ok(res_var.value)
         }
 
-        pub fn execute(&mut self, debug: bool, registers: &mut Vec<Register>, o_insts: Vec<Instruction>) -> Result<(), IllError> {
+        pub fn execute(&mut self, file: EnhancedFile, debug: bool, registers: &mut Vec<Register>, o_insts: Vec<Instruction>) -> Result<(), AdvancedIllError> {
             for opcode in &self.codes {
-                let res = opcode.execute(debug, registers, o_insts.clone(), &mut self.scope);
+                let res = opcode.execute(file.unsafe_clone().unsafe_clone(), debug, registers, o_insts.clone(), &mut self.scope);
                 if res.is_err() {
                     return res;
                 }
@@ -370,6 +413,7 @@ pub mod ill {
 
 
     impl Interpreter {
+
         fn find_opcode(&self, name: String) -> Option<&OpCode> {
             self.opcodes.iter().find(|x: &&OpCode| x.name == name)
         }
@@ -448,7 +492,7 @@ pub mod ill {
             self.find_instruction(name).is_some()
         }
 
-        fn parse_code(&self, rh: ReadHead, inst: &Instruction, insts: &Vec<Instruction>, code: String) -> Result<OpCode, IllError> {
+        fn parse_code(&self, file: EnhancedFile, rh: ReadHead, inst: &Instruction, insts: &Vec<Instruction>, code: String) -> Result<OpCode, AdvancedIllError> {
             fn sanitize(str: String) -> String {
                 str.replace("\"", "")
             }
@@ -459,19 +503,23 @@ pub mod ill {
             let error_rh = rh.new_by(-(nls as i32), ((-rh.column) + code.len() as i32));
             //println!("Looking for: {:?}, code = {:?}, data[0] = {:?}, data = {:?}", code_name.clone(), code.clone(), data[0].to_string(), data);
             if !self.does_opcode_exist(code_name.clone()) {
-                return Err(IllError::UnknownOpCode(
+                let err = UnknownOpCode(
                     error_rh,
                     code_name.clone(),
-                ));
+                );
+                let adv_err = AdvancedIllError::new(err, Some(error_rh), file);
+                return Err(adv_err);
             }
             let opcode = self.find_opcode(code_name.clone()).unwrap().clone();
             if (data.len() - 1) != opcode.arguments.len() {
-                return Err(IllError::OpCodeArgumentMismatch(
+                let err = OpCodeArgumentMismatch(
                     error_rh,
                     sanitize(data[0].to_string()),
                     opcode.arguments.len() as i32,
                     (data.len() - 1) as i32,
-                ));
+                );
+                let adv_err = AdvancedIllError::new(err, Some(error_rh), file.unsafe_clone());
+                return Err(adv_err);
             }
 
             fn is_arg_literal(arg: String) -> bool {
@@ -490,7 +538,7 @@ pub mod ill {
                 str.replace("\"", "")
             }
 
-            let mut exp_args = opcode.arguments.clone();
+            let exp_args = opcode.arguments.clone();
             let mut act_args: Vec<ExpressionType> = Vec::new();
             for i in 0..exp_args.len() {
                 let expected = exp_args[i].clone().into();
@@ -512,16 +560,20 @@ pub mod ill {
 
                     ExpressionType::StringLiteral(_) => {
                         if is_container(inst, self, argument.clone()) {
-                            return Err(UnescapedStringLiteralIsContainer(
+                            let err = UnescapedStringLiteralIsContainer(
                                 error_rh,
                                 argument.clone()
-                            ));
+                            );
+                            let adv_err = AdvancedIllError::new(err, Some(error_rh), file);
+                            return Err(adv_err);
                         } else if !is_arg_string(argument.clone()) {
-                            return Err(OpCodeInvalidArgument(
+                            let err = OpCodeInvalidArgument(
                                 error_rh,
                                 s_literal(),
                                 argument.clone()
-                            ));
+                            );
+                            let adv_err = AdvancedIllError::new(err, Some(error_rh), file);
+                            return Err(adv_err);
                         } else {
                             act_args.push(ExpressionType::StringLiteral(strip_quotes(argument.clone())));
                         }
@@ -542,18 +594,13 @@ pub mod ill {
                         if z.is_some() {
                             act_args.push(ExpressionType::InstructionReference(argument.clone(), z.unwrap().arguments.clone()));
                         } else {
-                            return Err(IllError::NonExistentInstruction(error_rh, argument.clone()));
+                            let err = NonExistentInstruction(error_rh, argument.clone());
+                            let adv_err = AdvancedIllError::new(err, Some(error_rh), file);
+                            return Err(adv_err);
                         }
                     }
                 }
             }
-            let has_result = act_args.iter().find(|x| x.name() == "res".to_string()).is_some();
-            let result = if has_result {
-                Some(0 as usize)
-            } else {
-                None
-            };
-
             Ok(OpCode {
                 name: code_name,
                 arguments: act_args,
@@ -561,12 +608,14 @@ pub mod ill {
             })
         }
 
-        fn scan_instructions(&mut self, preamble: bool) -> (Result<(), IllError>, Option<Duration>) {
+        fn scan_instructions(&mut self, preamble: bool) -> (Result<(), AdvancedIllError>, Option<Duration>) {
             fn read_inst_def(it: &mut Peekable<Chars>) -> (i32, i32, String) {
                 read_until(it, vec![INST_PARAM_BEGIN])
             }
 
+            let mut master_file: Option<EnhancedFile> = None;
             for e_file in if preamble { &self.preamble } else { &self.files } {
+                let file = e_file.try_clone().unwrap();
                 let mut it = e_file.content.chars().peekable();
                 let mut head: ReadHead = ReadHead::new();
                 let mut cur_inst: Instruction = Instruction::new_default();
@@ -577,16 +626,21 @@ pub mod ill {
                         dump_until(&mut head, it.by_ref(), vec![NEWLINE]);
                     } else if x == INST_DEF {
                         if cur_inst_sb.is_reading_definition {
-                            return (Err(UnexpectedCharacter(
+                            let err = UnexpectedCharacter(
                                 head,
                                 x,
-                                Some(String::from(" expecting instruction identifier.")),
-                            )), None);
+                                Some(String::from(", expecting instruction identifier."))
+                            );
+                            let adv_err = AdvancedIllError::new(err, Some(head), file);
+                            return (Err(adv_err), None);
                         } else {
                             cur_inst_sb.is_reading_definition = true;
                         }
                         if cur_inst_sb.is_reading_definition {
                             cur_inst.is_main = *it.peek().unwrap() == INST_DEF;
+                            if cur_inst.is_main {
+                                master_file = Some(file.unsafe_clone());
+                            }
                             let register_name = traverse_read(&mut head, read_inst_def(it.by_ref()));
                             cur_inst.name = register_name;
                             cur_inst_sb.is_reading_arguments = true;
@@ -607,14 +661,15 @@ pub mod ill {
                                 vec![INST_CODES_END],
                             )
                                 {
-                                    return (Err(UnexpectedCharacter(
+                                    let err = UnexpectedCharacter(
                                         head,
-                                        *it.peek().unwrap(), // TODO: Change back into x if we need to.
+                                        *it.peek().unwrap(),
                                         Some(format!(
-                                            " expecting instruction code beginning \"{}\".",
+                                            ", expecting instruction code beginning \"{}\".",
                                             INST_CODES_BEGIN
-                                        )),
-                                    )), None);
+                                        )));
+                                    let adv_err = AdvancedIllError::new(err, Some(head), file);
+                                    return (Err(adv_err), None);
                                 }
                             dump_until(&mut head, it.by_ref(), vec![INST_CODES_BEGIN]);
                             while it.peek().is_some() && *it.peek().unwrap() != INST_CODES_END {
@@ -634,7 +689,7 @@ pub mod ill {
                                 );
 
                                 let code = String::from(raw_code.trim());
-                                let res = self.parse_code(head.clone(), &cur_inst, &self.instructions, code.clone());
+                                let res = self.parse_code(file.unsafe_clone(), head.clone(), &cur_inst, &self.instructions, code.clone());
                                 if res.is_err() {
                                     return (Err(res.err().unwrap()), None);
                                 }
@@ -645,10 +700,13 @@ pub mod ill {
                             }
                             cur_inst_sb.is_reading_codes = false;
                             if self.does_instruction_exist(cur_inst.name.clone()) {
-                                return (Err(IllError::InstructionRedefinition(
+                                let head = head.new_by(0, -(cur_inst.name.len() as i32));
+                                let err = IllError::InstructionRedefinition(
                                     head.new_by(0, -(cur_inst.name.len() as i32)),
                                     cur_inst.name,
-                                )), None);
+                                );
+                                let adv_err = AdvancedIllError::new(err, Some(head), file);
+                                return (Err(adv_err), None);
                             }
                             self.instructions.push(cur_inst);
                             cur_inst = Instruction::new_default();
@@ -658,29 +716,30 @@ pub mod ill {
                 }
             }
             if self.instructions.len() == 0 {
-                return (Err(NoMainInstruction()), None);
+                return (Err(AdvancedIllError::new(NoMainInstruction(), None, self.files[0].unsafe_clone())), None);
             } else if self.instructions.len() == 1 {
                 self.instructions[0].is_main = true;
+                master_file = Some(self.files[0].unsafe_clone());
             }
             if self.debug {
                 println!("insts = {:?}", self.instructions);
             }
             if !preamble {
                 // inst.execute(debug, &self.registers, &self.instructions);
-
+                println!("Aaaa weiner");
                 let mut res = Ok(());
                 let dur = Duration::span(|| {
                     let inst_clone = self.instructions.clone();
                     let debug = self.debug;
                     let mut_inst: &mut Vec<Instruction> = self.instructions.as_mut();
                     let inst = mut_inst.iter_mut().find(|x| x.is_main).unwrap();
-                    res = inst.execute(debug, &mut self.registers, inst_clone)
+                    res = inst.execute(master_file.unwrap(), debug, &mut self.registers, inst_clone)
                 });
                 if !self.quiet {
                     println!("Pill Main Instruction Execution took {}s ({}ms).", dur.num_seconds(), dur.num_milliseconds());
                 }
                 if res.is_err() {
-                    return (Err(res.err().unwrap()), None);
+                    return (Err(res.err().unwrap()), Some(dur));
                 }
                 (res, Some(dur))
             } else {
@@ -688,11 +747,12 @@ pub mod ill {
             }
         }
 
-        fn create_registers(&mut self) -> Result<(), IllError> {
+        fn create_registers(&mut self) -> Result<(), AdvancedIllError> {
             for e_file in &self.files {
                 let mut iter = e_file.content.chars().peekable();
                 let mut head: ReadHead = ReadHead::new();
                 let mut has_found_registers: bool = false;
+                let file = e_file.try_clone().unwrap();
                 while let Some(x) = iter.next() {
                     head.advance(x);
                     if !x.is_whitespace() {
@@ -705,7 +765,8 @@ pub mod ill {
                                 );
                                 if self.does_register_exist(register_name.clone()) {
                                     let err_str = register_name.clone();
-                                    return Err(RegisterRedefinition(head, err_str, None));
+                                    let adv_err: AdvancedIllError = AdvancedIllError::new(RegisterRedefinition(head, err_str, None), Some(head), file);
+                                    return Err(adv_err);
                                 }
                                 self.registers.push(Register {
                                     identifier: register_name,
@@ -718,7 +779,8 @@ pub mod ill {
                     }
                 }
                 if !has_found_registers {
-                    return Err(NoRegistersFound(e_file.clone()));
+                    let adv_err: AdvancedIllError = AdvancedIllError::new(NoRegistersFound(e_file.unsafe_clone()), Some(head), file);
+                    return Err(adv_err);
                 } else if self.debug {
                     println!("Found registers: {:?}", self.registers);
                 }
@@ -726,24 +788,31 @@ pub mod ill {
             Ok(())
         }
 
-        pub fn begin_parsing(&mut self) -> Option<IllError> {
+        pub fn begin_parsing(&mut self) -> Option<AdvancedIllError> {
             let inst_scan = Duration::span(|| {
                 self.scan_instructions(true);
             });
 
-            let res = self.create_registers();
+            let res: Result<(), AdvancedIllError> = self.create_registers();
             if res.is_err() {
-                return res.err();
+                return res.err()
             }
 
             let mut res = (Ok(()), None);
             let sscan_dur = Duration::span(|| res = self.scan_instructions(false));
             let (a_res, time) = res; // destructure this tuple like im about to destructure misconceptions about race mixing
-            let r_t = sscan_dur.sub(time.unwrap());
-            if !self.quiet {
-                println!("Pill Preamble Instruction Scan took {}s, ({}ms).", inst_scan.num_seconds(), inst_scan.num_milliseconds());
-                println!("Pill Main Instruction Parsing took ({}s, ({}ms).", r_t.num_seconds(), r_t.num_milliseconds());
+            if time.is_some() {
+                let r_t = sscan_dur.sub(time.unwrap());
+                if !self.quiet {
+                    println!("Pill Preamble Instruction Scan took {}s, ({}ms).", inst_scan.num_seconds(), inst_scan.num_milliseconds());
+                    println!("Pill Main Instruction Parsing took ({}s, ({}ms).", r_t.num_seconds(), r_t.num_milliseconds());
+                }
+            } else {
+                if !self.quiet {
+                    println!("Encountered an error therefore any calculations of time are voided.");
+                }
             }
+
             if a_res.is_err() {
                 return a_res.err();
             }

@@ -42,5 +42,5 @@ $test_fizzbuzz() {
 }
 
 $$() {
-    for x 1 101 1 test_fizzbuzz;
+    for x 1 10001 1 test_fizzbuzz;
 }
