@@ -1,0 +1,40 @@
++_;
+
+$bottle_1() {
+  ptl "One more bottle of beer on the wall, one more bottle of beer. Take onw down, pass it around, no more bottles of beer on the wall!";
+}
+
+$bottles_norm() {
+  dis x; pt " bottles of beer on the wall, "; dis x; pt " bottles of beer. Take one down, pass it around, "; dis y; ptl " bottles of beer on the wall!";
+}
+
+$no_bottles() {
+  ptl "No more bottles of beer on the wall!";
+}
+
+$bt_z() {
+  gt x 0 z;
+  mvv z res;
+  del z;
+}
+
+$bt_o() {
+  gt x 1 z;
+  mvv z res;
+  del z;
+}
+
+$bottles'() {
+  if bt_o bottles_norm bottle_1;
+}
+
+$bottles() {
+  mak y x;
+  mvv -1 y;
+  if bt_z bottles' no_bottles;
+  del y;
+}
+
+$$() {
+  for x 100 0 1 bottles;
+}

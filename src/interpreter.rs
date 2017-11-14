@@ -549,13 +549,21 @@ pub mod ill {
                 match expected {
                     ExpressionType::ProbableLiteral(_) => {
                         if is_arg_literal(argument.clone()) {
-                            act_args.push(ExpressionType::ProbableLiteral(Either::Left(argument.parse::<f64>().unwrap())));
+                            let mut a_clone = argument.clone();
+                            if !a_clone.contains(".") {
+                                a_clone.push('.');
+                            }
+                            act_args.push(ExpressionType::ProbableLiteral(Either::Left(a_clone.parse::<f64>().unwrap())));
                         } else {
                             act_args.push(ExpressionType::ProbableLiteral(Either::Right(argument.clone())));
                         }
                     }
                     ExpressionType::IntegerLiteral(_) => {
-                        act_args.push(ExpressionType::IntegerLiteral(argument.parse::<f64>().unwrap()));
+                        let mut a_clone = argument.clone();
+                        if !a_clone.contains(".") {
+                            a_clone.push('.');
+                        }
+                        act_args.push(ExpressionType::IntegerLiteral(a_clone.parse::<f64>().unwrap()));
                     }
 
                     ExpressionType::StringLiteral(_) => {
@@ -726,7 +734,6 @@ pub mod ill {
             }
             if !preamble {
                 // inst.execute(debug, &self.registers, &self.instructions);
-                println!("Aaaa weiner");
                 let mut res = Ok(());
                 let dur = Duration::span(|| {
                     let inst_clone = self.instructions.clone();

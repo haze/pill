@@ -71,9 +71,8 @@ pub mod ill {
         opcodes.push(OpCode::new("eq").expecting(prob_literal()).expecting(prob_literal()).expecting(s_literal()));
         opcodes.push(OpCode::new("gte").expecting(prob_literal()).expecting(prob_literal()).expecting(s_literal()));
         opcodes.push(OpCode::new("lte").expecting(prob_literal()).expecting(prob_literal()).expecting(s_literal()));
-        opcodes.push(OpCode::new("mvv").expecting(prob_literal()).expecting(container()));
-        opcodes.push(OpCode::new("add").expecting(literal()).expecting(container()));
-        opcodes.push(OpCode::new("mak").expecting(s_literal()).expecting(literal()));
+        opcodes.push(OpCode::new("add").expecting(prob_literal()).expecting(container()));
+        opcodes.push(OpCode::new("mak").expecting(s_literal()).expecting(prob_literal()));
         opcodes.push(OpCode::new("dis").expecting(container()));
         opcodes.push(OpCode::new("dsl").expecting(container()));
         opcodes.push(OpCode::new("do").expecting(inst_ref()));
@@ -173,37 +172,19 @@ pub mod ill {
                             let err = IllError::RegisterRedefinition(rh_err, identifier.clone(), Some(variable().name()));
                             return Err(AdvancedIllError::new(err, rh_err_o, file));
                         }
-                        if let ExpressionType::IntegerLiteral(value) = self.arguments[1] {
+                        if let ExpressionType::ProbableLiteral(ref value) = self.arguments[1] {
                             if identifier.eq_ignore_ascii_case("res") {
                                 let err = IllError::RegisterRedefinition(rh_err, identifier.clone(), Some(format!("default register {:?}", identifier)));
                                 return Err(AdvancedIllError::new(err, rh_err_o, file));
                             }
-                            scope.push(Register { identifier: identifier.clone(), value, is_variable: true });
-                            if debug {
-                                println!("Added variable {} => {}", identifier, value);
-                            }
-                        }
-                    }
-                }
-                "mvv" => {
-                    if let ExpressionType::ProbableLiteral(ref value) = self.arguments[0] {
-                        if let ExpressionType::ContainerReference(ref identifier) = self.arguments[1] {
                             let cont = self.get_absolute_value(file.unsafe_clone(), rh_err, value, registers, scope);
                             if cont.is_err() {
                                 return Err(cont.err().unwrap());
                             }
-
-                            let reg_ref = if !self.g_register_exists(identifier.clone(), registers) {
-                                if !self.l_register_exists(identifier.clone(), scope) {
-                                    let err = IllError::NonExistentRegister(rh_err, identifier.clone());
-                                    return Err(AdvancedIllError::new(err, rh_err_o, file));
-                                } else {
-                                    scope.iter_mut().find(|x| x.identifier == *identifier).unwrap()
-                                }
-                            } else {
-                                registers.iter_mut().find(|x| x.identifier == *identifier).unwrap()
-                            };
-                            reg_ref.value += cont.ok().unwrap();
+                            scope.push(Register { identifier: identifier.clone(), value: cont.ok().unwrap(), is_variable: true });
+                            if debug {
+                                println!("Added variable {} => {}", identifier, value);
+                            }
                         }
                     }
                 }
@@ -234,13 +215,13 @@ pub mod ill {
                             if value.is_err() {
                                 return Err(value.err().unwrap());
                             }
-
+                            let res = value.ok().unwrap();
                             if self.l_register_exists(variable.clone(), scope) {
                                 let reg = scope.iter_mut().find(|x| x.identifier == *variable).unwrap();
-                                reg.value += value.ok().unwrap();
+                                reg.value += res;
                             } else if self.g_register_exists(variable.clone(), registers) {
                                 let reg = registers.iter_mut().find(|x| x.identifier == *variable).unwrap();
-                                reg.value += value.ok().unwrap();
+                                reg.value += res;
                             } else {
                                 let err = IllError::NonExistentRegister(rh_err, variable.clone());
                                 return Err(AdvancedIllError::new(err, rh_err_o, file));
@@ -276,7 +257,7 @@ pub mod ill {
                 }
                 "dsl" => {
                     if let ExpressionType::ContainerReference(ref identifier) = self.arguments[0] {
-                        let mut value;
+                        let value;
                         if !self.g_register_exists(identifier.clone(), registers) {
                             if !self.l_register_exists(identifier.clone(), scope) {
                                 let err = IllError::NonExistentRegister(rh_err, identifier.clone());
@@ -292,7 +273,7 @@ pub mod ill {
                 }
                 "dis" => {
                     if let ExpressionType::ContainerReference(ref identifier) = self.arguments[0] {
-                        let mut value;
+                        let value;
                         if !self.g_register_exists(identifier.clone(), registers) {
                             if !self.l_register_exists(identifier.clone(), scope) {
                                 let err = IllError::NonExistentRegister(rh_err, identifier.clone());
