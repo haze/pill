@@ -19,7 +19,6 @@ pub mod ill {
     use NamedFile;
     use self::IllError::*;
 
-    const TAB: char = ' ';
     const NEWLINE: char = '\n';
     const REGISTER_DEF: char = '+';
     const DEF_END: char = ';';
