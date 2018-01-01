@@ -1,6 +1,4 @@
 <img src="https://cdn.rawgit.com/hvze/pill/7563861d/images/pill_logo.svg" width=55/> 
-
-
 # pill
 
 The (Pretty) Ill Programming Language's Rust Interpreter
@@ -22,7 +20,6 @@ or
 
 I'm like 100% sure you need to have the rust toolchain installed, if you need to do that, try [rustup.rs](https://rustup.rs)
 
-
 ### Installing
 
 clone the repository and run `cargo build --release` to produce a binary, then copy to your PATH variable for use elsewhere.
@@ -39,7 +36,7 @@ Running `target/debug/pill tests/programs/do/do_good.ill`
 
 ### Categorized tests
 
-Most of the tests are pretty organized, just run the interpreter with the `-d` flag and see what the output is and if you see anything suspicious or unexpected output, let me know. I haven't been using a testing framework because a lot of the code is very unstable and there is no spec; a lot will probably change.
+Most of the tests are pretty organized, just run the interpreter with the `-d` flag and see what the output is and if you see anything suspicious or unexpected output, let me know. Migration to a test suite will come soon!
 
 
 ```
@@ -57,6 +54,7 @@ The following rust crates:
 * time, v0.1.37
 * termcolor, v0.3.3
 * pcre, v0.2.3
+* either, v1.2.0
 
 ## Contributing
 
@@ -70,14 +68,12 @@ Versioning is a bit hectic as I haven't been keeping tags or marks on what i've 
 
 * **Haze Booth** - *Initial work* - [hvze](https://github.com/hvze)
 
-See also the list of [contributors](https://github.com/hvze/pill/contributors) who participated in this project.
-
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
+This project is licensed under the MIT License
 
 ## Acknowledgments
 
 * Hat tip to anyone who's code was used
-* Inspired by NASN and x86 aassem
+* Inspired loosely by FASM 
 
