@@ -14,13 +14,13 @@ $no_bottles() {
 
 $bt_z() {
   gt x 0 z;
-  mvv z res;
+  mov z res;
   del z;
 }
 
 $bt_o() {
   gt x 1 z;
-  mvv z res;
+  mov z res;
   del z;
 }
 
@@ -30,7 +30,7 @@ $bottles'() {
 
 $bottles() {
   mak y x;
-  mvv -1 y;
+  add -1 y;
   if bt_z bottles' no_bottles;
   del y;
 }

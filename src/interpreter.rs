@@ -105,6 +105,7 @@ pub mod ill {
     }
 
     #[derive(Debug)]
+    #[allow(dead_code)]
     pub enum IllError {
         RegisterRedefinition(ReadHead, String, Option<String>),
         NoRegistersFound(EnhancedFile),
@@ -301,14 +302,6 @@ pub mod ill {
             });
             Instruction { scope, ..Instruction::default() }
         }
-        fn new(name: String, codes: Vec<OpCode>, mut scope: Vec<Register>, arguments: Vec<String>, is_main: bool) -> Instruction {
-            scope.push(Register {
-                identifier: "res".to_string(),
-                value: 0 as f64,
-                is_variable: true,
-            });
-            Instruction { name, codes, scope, arguments, is_main }
-        }
 
         fn find_scoped_register(&self, name: String) -> Option<&Register> {
             self.scope.iter().find(|&x| x.identifier == name)
@@ -359,10 +352,6 @@ pub mod ill {
         is_reading_codes: bool,
     }
 
-    fn dump_all_until_any(head: &mut ReadHead, it: &mut Peekable<Chars>, ch: Vec<char>) {
-        traverse_read(head, read_all_until_any(it, ch));
-    }
-
     fn dump_until(head: &mut ReadHead, it: &mut Peekable<Chars>, ch: Vec<char>) {
         let _ = traverse_read(head, read_until_spare_ws(it, ch));
     }
@@ -375,18 +364,6 @@ pub mod ill {
 
     fn newlines(x: &String) -> i32 {
         x.chars().filter(|x| *x == NEWLINE).count() as i32
-    }
-
-    // because fuck iterators
-    // im sorry i love u iterator <3
-    fn read_all_until_any(it: &mut Peekable<Chars>, ch: Vec<char>) -> (i32, i32, String) {
-        let z = it.take_while(|c| ch.contains(c)).collect::<String>();
-        let nl = newlines(&z);
-        (
-            nl,
-            z.len() as i32 - nl,
-            z,
-        )
     }
 
     fn read_until(it: &mut Peekable<Chars>, ch: Vec<char>) -> (i32, i32, String) {
@@ -526,7 +503,11 @@ pub mod ill {
             }
 
             fn is_arg_string(arg: String) -> bool {
-                arg.chars().find(|x| x.is_numeric()).is_none() // just make sure its [A-z]
+                if arg.starts_with("\"") && arg.ends_with("\"") {
+                    true
+                } else {
+                    arg.chars().find(|x| x.is_numeric()).is_none() // just make sure its [A-z]
+                }
             }
 
             fn is_container(instruc: &Instruction, int: &Interpreter, ctx: String) -> bool {

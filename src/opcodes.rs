@@ -2,7 +2,6 @@ pub mod ill {
     use interpreter::ill::{ReadHead, Register, Instruction, EnhancedFile, AdvancedIllError, IllError};
     use opcodes::ill::ExpressionType::*;
     use std::default::Default;
-    use std::ascii::AsciiExt;
     use either::Either;
 
     const TRUE: f64 = 0f64;
@@ -507,7 +506,7 @@ pub mod ill {
                         if let ExpressionType::IntegerLiteral(ref from) = self.arguments[1] {
                             if let ExpressionType::IntegerLiteral(ref through) = self.arguments[2] {
                                 if let ExpressionType::IntegerLiteral(ref step) = self.arguments[3] {
-                                    if let ExpressionType::InstructionReference(ref inst, ref captures) = self.arguments[4] {
+                                    if let ExpressionType::InstructionReference(ref inst, _) = self.arguments[4] {
                                         if self.g_register_exists(injected_var_name.clone(), registers) {
                                             let err = IllError::RegisterRedefinition(rh_err, injected_var_name.clone(), Some(register().name()));
                                             return Err(AdvancedIllError::new(err, rh_err_o, file));
@@ -550,9 +549,9 @@ pub mod ill {
                     }
                 }
                 "if" => {
-                    if let ExpressionType::InstructionReference(ref inst, ref captures) = self.arguments[0] {
-                        if let ExpressionType::InstructionReference(ref a_inst, ref a_captures) = self.arguments[1] {
-                            if let ExpressionType::InstructionReference(ref b_inst, ref b_captures) = self.arguments[2] {
+                    if let ExpressionType::InstructionReference(ref inst, _) = self.arguments[0] {
+                        if let ExpressionType::InstructionReference(ref a_inst, _) = self.arguments[1] {
+                            if let ExpressionType::InstructionReference(ref b_inst, _) = self.arguments[2] {
                                 let nested_clone = o_insts.clone();
                                 if !self.instruction_exists(inst, nested_clone) {
                                     let err = IllError::NonExistentInstruction(rh_err, inst.clone());
@@ -587,7 +586,7 @@ pub mod ill {
                     }
                 }
                 "do" => {
-                    if let ExpressionType::InstructionReference(ref inst, ref captures) = self.arguments[0] {
+                    if let ExpressionType::InstructionReference(ref inst, _) = self.arguments[0] {
                         if self.instruction_exists(inst, o_insts.clone()) {
                             let copy = o_insts.clone();
                             o_insts.iter_mut().find(|x| x.name == *inst).unwrap().c_execute(file.unsafe_clone(), debug, registers, copy, scope).ok().unwrap();
@@ -598,7 +597,7 @@ pub mod ill {
                     }
                 }
                 "dor" => {
-                    if let ExpressionType::InstructionReference(ref inst, ref captures) = self.arguments[0] {
+                    if let ExpressionType::InstructionReference(ref inst, _) = self.arguments[0] {
                         if let ExpressionType::StringLiteral(ref identifier) = self.arguments[1] {
                             if self.g_register_exists(identifier.clone(), registers) {
                                 let err = IllError::RegisterRedefinition(rh_err, identifier.clone(), Some(register().name()));
