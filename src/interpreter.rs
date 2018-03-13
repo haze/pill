@@ -58,7 +58,7 @@ pub mod ill {
                 return Some(EnhancedFile {
                     file: f_copy.ok().unwrap(),
                     filename: self.filename.clone(),
-                    content: self.content.clone()
+                    content: self.content.clone(),
                 });
             }
             None
@@ -84,7 +84,7 @@ pub mod ill {
     pub struct AdvancedIllError {
         pub error: IllError,
         pub head: Option<ReadHead>,
-        pub file: EnhancedFile
+        pub file: EnhancedFile,
     }
 
     impl AdvancedIllError {
@@ -99,7 +99,7 @@ pub mod ill {
             AdvancedIllError {
                 error: err,
                 head,
-                file
+                file,
             }
         }
     }
@@ -389,7 +389,6 @@ pub mod ill {
 
 
     impl Interpreter {
-
         fn find_opcode(&self, name: String) -> Option<&OpCode> {
             self.opcodes.iter().find(|x: &&OpCode| x.name == name)
         }
@@ -550,7 +549,7 @@ pub mod ill {
                         if is_container(inst, self, argument.clone()) {
                             let err = UnescapedStringLiteralIsContainer(
                                 error_rh,
-                                argument.clone()
+                                argument.clone(),
                             );
                             let adv_err = AdvancedIllError::new(err, Some(error_rh), file);
                             return Err(adv_err);
@@ -558,7 +557,7 @@ pub mod ill {
                             let err = OpCodeInvalidArgument(
                                 error_rh,
                                 s_literal(),
-                                argument.clone()
+                                argument.clone(),
                             );
                             let adv_err = AdvancedIllError::new(err, Some(error_rh), file);
                             return Err(adv_err);
@@ -617,7 +616,7 @@ pub mod ill {
                             let err = UnexpectedCharacter(
                                 head,
                                 x,
-                                Some(String::from(", expecting instruction identifier."))
+                                Some(String::from(", expecting instruction identifier.")),
                             );
                             let adv_err = AdvancedIllError::new(err, Some(head), file);
                             return (Err(adv_err), None);
@@ -782,7 +781,7 @@ pub mod ill {
 
             let res: Result<(), AdvancedIllError> = self.create_registers();
             if res.is_err() {
-                return res.err()
+                return res.err();
             }
 
             let mut res = (Ok(()), None);

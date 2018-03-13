@@ -1,5 +1,0 @@
-+a;
-| This should fail, as a is shadowed by the register a defined above.
-$$() {
-    mov 1 a;
-}

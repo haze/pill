@@ -1,26 +1,20 @@
 extern crate clap;
-
-use clap::{Arg, App};
-
 extern crate time;
-
-use time::Duration;
-
 extern crate termcolor;
-
-use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
-
-use std::fs::File;
-use std::io::Write;
-
 extern crate pcre;
 extern crate either;
+extern crate gag;
 
+use clap::{Arg, App};
+use time::Duration;
+use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
+use std::fs::File;
+use std::io::Write;
 mod interpreter;
-
 use interpreter::ill::{Interpreter, AdvancedIllError};
-
 mod opcodes;
+
+
 
 pub struct NamedFile {
     file: File,
@@ -34,6 +28,7 @@ fn repeat(times: i32, char: char) -> String {
     }
     buff
 }
+
 
 fn main() {
     let arg_matches = App::new("ill interpreter")

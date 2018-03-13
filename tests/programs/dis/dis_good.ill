@@ -1,8 +1,0 @@
-+a;
-
-$$ () {
-    mov 4 a;
-    mak b 4;
-    mov 19 b;
-    dis b;
-}
