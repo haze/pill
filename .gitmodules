@@ -3,4 +3,4 @@
 	url = /Users/haze/Projects/Python/bintest
 [submodule "tests/bintest"]
 	path = tests/bintest
-	url = /Users/haze/Projects/Python/bintest
+	url = https://github.com/hvze/bintest
