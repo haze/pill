@@ -1,4 +1,4 @@
-<img src="./images/pill_logo.svg" width=55/> 
+<img src="https://cdn.rawgit.com/hvze/pill/7563861d/images/pill_logo.svg?sanitize=true" width=55/> 
 
 # pill
 
